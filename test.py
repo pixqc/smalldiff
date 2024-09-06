@@ -13,18 +13,18 @@ def forward_smalldiff(incl_grad=False):
   x = Tensor(x_init)
   w = Tensor(w_init)
   m = Tensor(m_init)
-  out = x.dot(w)
+  out = x.matmul(w)
   outr = out.tanh()
   outl = outr.logsoftmax()
   outm = outl.mul(m)
   outx = outm.sum()
-  return outx.data[0]
+  return outx.data
 
 
 def forward_jax(incl_grad=False):
   @jit
   def forward(x, W, m):
-    out = jnp.dot(x, W)
+    out = jnp.matmul(x, W)
     outr = jax.nn.tanh(out)
     outl = jax.nn.log_softmax(outr, axis=1)
     outm = outl * m
@@ -35,7 +35,7 @@ def forward_jax(incl_grad=False):
   w = jnp.array(w_init)
   m = jnp.array(m_init)
   outx = forward(x, w, m)
-  return outx
+  return outx.item()
 
 
 np.testing.assert_allclose(forward_smalldiff(), forward_jax())
