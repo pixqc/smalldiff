@@ -1,5 +1,6 @@
 import numpy as np
 from enum import Enum
+from typing import Optional
 
 
 OP = Enum("OP", ["UNARY", "BINARY"])
@@ -9,92 +10,98 @@ class Tensor:
   def __init__(self, data):
     self.data = np.array(data)
     self.grad = None
-    self.prev = []
-    self._backward = lambda: None
-
-  def add(self, other):
-    return Add.apply(OP.BINARY, self, other)
-
-  def tanh(self):
-    return Tanh.apply(OP.UNARY, self)
-
-  def sum(self):
-    return Sum.apply(OP.UNARY, self)
-
-  def logsoftmax(self):
-    return LogSoftmax.apply(OP.UNARY, self)
+    self._ctx: Optional[Function] = None
 
   def relu(self):
-    return Relu.apply(OP.UNARY, self)
+    return Relu.apply(self)
+
+  def tanh(self):
+    return Tanh.apply(self)
+
+  def logsoftmax(self, axis=None):
+    return LogSoftmax.apply(self, axis)
+
+  def add(self, other):
+    return Add.apply(self, other)
+
+  def sum(self):
+    return Sum.apply(self)
 
   def mul(self, other):
-    return Mul.apply(OP.BINARY, self, other)
+    return Mul.apply(self, other)
 
   def matmul(self, other):
-    return Matmul.apply(OP.BINARY, self, other)
+    return Matmul.apply(self, other)
 
   def __repr__(self):
     return f"Tensor(data={self.data}, grad={self.grad})"
 
   __add__ = add
+  __mul__ = mul
+  __matmul__ = matmul
 
 
 class Function:
-  @staticmethod
-  def forward(*args):
-    raise NotImplementedError
+  def __init__(self, *tensors: Tensor):
+    self.prev = tensors
+
+  def forward(self, *args, **kwargs):
+    raise NotImplementedError(f"forward not implemented for {type(self)}")
+
+  def backward(self, *args, **kwargs):
+    raise NotImplementedError(f"backward not implemented for {type(self)}")
 
   @classmethod
-  def apply(cls, *args):
-    op = args[0]
-    if op == OP.UNARY:
-      return cls.forward(args[1].data)
-    elif op == OP.BINARY:
-      return cls.forward(args[1].data, args[2].data)
-    else:
-      raise NotImplementedError
-
-
-class Tanh(Function):
-  @staticmethod
-  def forward(x):
-    return Tensor(np.tanh(x))
-
-
-class Sum(Function):
-  @staticmethod
-  def forward(x):
-    return Tensor(np.sum(x))
-
-
-class Add(Function):
-  @staticmethod
-  def forward(x, y):
-    return Tensor(x + y)
-
-
-class LogSoftmax(Function):
-  @staticmethod
-  def forward(x):
-    max_val = np.max(x, axis=1, keepdims=True)
-    exp_x = np.exp(x - max_val)
-    log_sum_exp = np.log(np.sum(exp_x, axis=1, keepdims=True))
-    return Tensor(x - max_val - log_sum_exp)
+  def apply(cls, *x: Tensor, **kwargs):
+    fxn: Function = cls(*x)
+    res: Tensor = fxn.forward(*[t.data for t in x], **kwargs)
+    res._ctx = fxn
+    return res
 
 
 class Relu(Function):
-  @staticmethod
-  def forward(x):
+  def forward(self, x):
     return Tensor(np.maximum(x, 0))
 
 
+class Tanh(Function):
+  def forward(self, x):
+    return Tensor(np.tanh(x))
+
+  def backward(self, out_grad):
+    self.prev[0].grad = out_grad * (1 - self.prev[0].data ** 2)
+
+
+class Add(Function):
+  def forward(self, x, y):
+    return Tensor(x + y)
+
+  def backward(self, out_grad):
+    self.prev[0].grad = out_grad
+    self.prev[1].grad = out_grad
+
+
+class Sum(Function):
+  def forward(self, x):
+    return Tensor(np.sum(x))
+
+  def backward(self, out_grad):
+    self.prev[0].grad = np.broadcast_to(out_grad, self.prev[0].data.shape)
+
+
 class Mul(Function):
-  @staticmethod
-  def forward(x, y):
+  def forward(self, x, y):
     return Tensor(x * y)
+
+  def backward(self, out_grad):
+    self.prev[0].grad = out_grad * self.prev[1].data
+    self.prev[1].grad = out_grad * self.prev[0].data
 
 
 class Matmul(Function):
-  @staticmethod
-  def forward(x, y):
+  def forward(self, x, y):
     return Tensor(x @ y)
+
+  def backward(self, out_grad):
+    self.prev[0].grad = out_grad @ self.prev[1].data.T
+    self.prev[1].grad = out_grad.T @ self.prev[0].data

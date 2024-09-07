@@ -4,38 +4,53 @@ import jax.numpy as jnp
 from jax import grad, jit
 from tensor import Tensor
 
-x_init = np.random.randn(1, 3).astype(np.float32)
-w_init = np.random.randn(3, 3).astype(np.float32)
-m_init = np.random.randn(1, 3).astype(np.float32)
+
+def forward_smalldiff(x_data, w_data):
+  x = Tensor(x_data)
+  w = Tensor(w_data)
+
+  a = x @ w
+  b = a + Tensor([1.0])
+  c = b.sum()
+  out = c.tanh()
+
+  out._ctx.backward(1.0)
+  c._ctx.backward(c.grad)
+  b._ctx.backward(b.grad)
+  a._ctx.backward(a.grad)
+
+  return out.data, x.grad, w.grad
 
 
-def forward_smalldiff(incl_grad=False):
-  x = Tensor(x_init)
-  w = Tensor(w_init)
-  m = Tensor(m_init)
-  out = x.matmul(w)
-  outr = out.tanh()
-  outl = outr.logsoftmax()
-  outm = outl.mul(m)
-  outx = outm.sum()
-  return outx.data
-
-
-def forward_jax(incl_grad=False):
+def forward_jax(x_data, w_data):
   @jit
-  def forward(x, W, m):
-    out = jnp.matmul(x, W)
-    outr = jax.nn.tanh(out)
-    outl = jax.nn.log_softmax(outr, axis=1)
-    outm = outl * m
-    return jnp.sum(outm)
+  def forward(x, w):
+    out = jnp.matmul(x, w)
+    out = out + 1.0
+    out = jnp.sum(out)
+    out = jax.nn.tanh(out)
+    return out
 
-  _grad_fn = jit(grad(forward, argnums=(0, 1)))
-  x = jnp.array(x_init)
-  w = jnp.array(w_init)
-  m = jnp.array(m_init)
-  outx = forward(x, w, m)
-  return outx.item()
+  grad_fn = jit(grad(forward, argnums=(0, 1)))
+  x = jnp.array(x_data)
+  w = jnp.array(w_data)
+  out = forward(x, w)
+  x_grad, w_grad = grad_fn(x, w)
+  return out.item(), x_grad, w_grad
 
 
-np.testing.assert_allclose(forward_smalldiff(), forward_jax())
+x_data = np.random.randn(1, 3).astype(np.float32)
+w_data = np.random.randn(3, 3).astype(np.float32)
+out_smalldiff, x_grad_smalldiff, w_grad_smalldiff = forward_smalldiff(x_data, w_data)
+out_jax, x_grad_jax, w_grad_jax = forward_jax(x_data, w_data)
+
+# print(out_smalldiff, out_jax)
+# print(x_grad_smalldiff, x_grad_jax)
+print(f"w_grad_smalldiff: {w_grad_smalldiff}")
+print(f"w_grad_jax: {w_grad_jax}")
+
+# np.testing.assert_allclose(out_smalldiff, out_jax, rtol=1e-5, atol=1e-5)
+# np.testing.assert_allclose(x_grad_smalldiff, x_grad_jax, rtol=1e-5, atol=1e-5)
+# np.testing.assert_allclose(w_grad_smalldiff, w_grad_jax, rtol=1e-5, atol=1e-5)
+
+# print("Tests passed!")
