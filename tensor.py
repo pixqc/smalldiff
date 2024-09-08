@@ -51,8 +51,10 @@ class Tensor:
     return _deepwalk(self, set(), [])
 
   def backward(self):
+    assert self.data.ndim == 0, "only scalar can be backwarded"
     self.grad = 1.0
     for prev in reversed(self.deepwalk()):
+      assert isinstance(prev._ctx, Function), f"ctx is None for {prev}"
       prev._ctx.backward(prev.grad)
 
   __add__ = add
