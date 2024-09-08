@@ -1,3 +1,4 @@
+from __future__ import annotations
 import numpy as np
 from enum import Enum
 from typing import Optional
@@ -36,6 +37,23 @@ class Tensor:
 
   def __repr__(self):
     return f"Tensor(data={self.data}, grad={self.grad})"
+
+  def deepwalk(self) -> list[Tensor]:
+    def _deepwalk(node, visited, nodes):
+      visited.add(node)
+      if getattr(node, "_ctx", None):
+        for i in node._ctx.prev:
+          if i not in visited:
+            _deepwalk(i, visited, nodes)
+        nodes.append(node)
+      return nodes
+
+    return _deepwalk(self, set(), [])
+
+  def backward(self):
+    self.grad = 1.0
+    for prev in reversed(self.deepwalk()):
+      prev._ctx.backward(prev.grad)
 
   __add__ = add
   __mul__ = mul
