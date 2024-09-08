@@ -80,15 +80,11 @@ class Add(Function):
     return Tensor(x + y)
 
   def backward(self, out_grad):
-    if self.prev[0].shape != out_grad.shape:
-      self.prev[0].grad = np.sum(out_grad, axis=0, keepdims=True)
-    else:
-      self.prev[0].grad = out_grad
-
-    if self.prev[1].shape != out_grad.shape:
-      self.prev[1].grad = np.sum(out_grad, axis=0, keepdims=True)
-    else:
-      self.prev[1].grad = out_grad
+    for prev in self.prev:
+      if prev.shape != out_grad.shape:
+        prev.grad = np.sum(out_grad, axis=0, keepdims=True)
+      else:
+        prev.grad = out_grad
 
 
 class Sum(Function):
@@ -114,4 +110,4 @@ class Matmul(Function):
 
   def backward(self, out_grad):
     self.prev[0].grad = out_grad @ self.prev[1].data.T
-    self.prev[1].grad = out_grad.T @ self.prev[0].data
+    self.prev[1].grad = (out_grad.T @ self.prev[0].data).T
