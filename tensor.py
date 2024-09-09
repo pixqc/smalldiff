@@ -58,9 +58,8 @@ class Tensor:
   #   return Matmul.apply(self, other)
 
   def __repr__(self):
-    shape = self.data.shape if self.data.ndim else f"data={self.data}"
-    grad = f" with grad {self.grad.shape}" if self.grad is not None else ""
-    return f"Tensor({shape}{grad})"
+    grad_repr = self.grad.data if self.grad else None
+    return f"<Tensor {self.data!r} with grad {grad_repr!r}>"
 
   def deepwalk(self) -> list[Tensor]:
     def _deepwalk(node, visited, nodes):
