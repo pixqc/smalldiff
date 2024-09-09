@@ -74,6 +74,35 @@ class TestGrad(unittest.TestCase):
     self.assertTrue(np.allclose(x.grad.data, x_torch.grad.numpy()))
     self.assertTrue(np.allclose(y.grad.data, y_torch.grad.numpy()))
 
+  def test_relu_00(self):
+    x_np = np.random.randn(3, 4)
+    x = Tensor(x_np)
+    out = x.relu().sum()
+    out.backward()
+
+    x_torch = torch.tensor(x_np, requires_grad=True)
+    out_torch = torch.relu(x_torch).sum()
+    out_torch.backward()
+
+    assert isinstance(x.grad, Tensor)
+    self.assertTrue(np.allclose(x.grad.data, x_torch.grad.numpy()))
+
+  def test_logsoftmax_00(self):
+    x_np = np.random.randn(3, 4)
+    x = Tensor(x_np)
+    out = x.softmax().sum()
+    out.backward()
+
+    x_torch = torch.tensor(x_np, requires_grad=True)
+    out_torch = torch.nn.functional.softmax(x_torch, dim=1).sum()
+    out_torch.backward()
+
+    print(out)
+    print(out_torch)
+
+    assert isinstance(x.grad, Tensor)
+    self.assertTrue(np.allclose(x.grad.data, x_torch.grad.numpy()))
+
 
 if __name__ == "__main__":
   unittest.main()

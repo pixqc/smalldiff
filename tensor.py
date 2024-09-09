@@ -44,14 +44,12 @@ class Tensor:
   def matmul(self, other):
     return Matmul.apply(self, other)
 
-  # def relu(self):
-  #   return Relu.apply(self)
-  #
-  # def tanh(self):
-  #   return Tanh.apply(self)
-  #
-  # def logsoftmax(self):
-  #   return LogSoftmax.apply(self)
+  def relu(self):
+    return Relu.apply(self)
+
+  def softmax(self):
+    return Softmax.apply(self)
+
   #
   #
   # def mul(self, other):
@@ -141,33 +139,30 @@ class Matmul(Function):
     y.grad = Tensor(x.T.data @ out_grad.data)
 
 
-# class Relu(Function):
-#   def forward(self, x) -> Tensor:
-#     return Tensor(np.maximum(x, 0))
-#
-#
-# class Tanh(Function):
-#   def forward(self, x) -> Tensor:
-#     res = Tensor(np.tanh(x))
-#     self.res = res
-#     return res
-#
-#   def backward(self, out_grad: Tensor):
-#     self.prev[0].grad = out_grad * (1 - self.res.data**2)
-#
-#
-# class LogSoftmax(Function):
-#   def forward(self, x) -> Tensor:
-#     if x.ndim == 1:
-#       x = x.reshape(1, -1)
-#     max_x = np.max(x, axis=1, keepdims=True)
-#     exp_x = np.exp(x - max_x)
-#     sum_exp_x = np.sum(exp_x, axis=1, keepdims=True)
-#     log_sum_exp = np.log(sum_exp_x) + max_x
-#     res = x - log_sum_exp
-#
-#     self.res = res
-#     return Tensor(res)
+class Relu(Function):
+  def forward(self, x) -> Tensor:
+    return Tensor(np.maximum(x, 0))
+
+  def backward(self, out_grad: Tensor):
+    self.prev[0].grad = Tensor(out_grad.data * (self.prev[0].data > 0))
+
+
+class Softmax(Function):
+  def forward(self, x) -> Tensor:
+    if x.ndim == 1:
+      x = x.reshape(1, -1)
+    max_x = np.max(x, axis=1, keepdims=True)
+    exp_x = np.exp(x - max_x)
+    sum_exp_x = np.sum(exp_x, axis=1, keepdims=True)
+    res = exp_x / sum_exp_x
+    self.res = res
+    return Tensor(res)
+
+  def backward(self, out_grad: Tensor):
+    grad = self.res * (
+      out_grad.data - np.sum(out_grad.data * self.res, axis=1, keepdims=True)
+    )
+    self.prev[0].grad = Tensor(grad)
 
 
 #
