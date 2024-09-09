@@ -1,27 +1,39 @@
 from __future__ import annotations
+
+from typing import Optional, Union
+
 import numpy as np
-from enum import Enum
-from typing import Optional
-
-
-OP = Enum("OP", ["UNARY", "BINARY"])
 
 
 class Tensor:
-  def __init__(self, data):
-    self.data = np.array(data)
-    self.grad = None
+  def __init__(self, data, dtype=None):
+    self.data = np.array(data, dtype=dtype)
+    self.grad: Optional[Tensor] = None
     self._ctx: Optional[Function] = None
 
   @property
   def shape(self):
     return self.data.shape
 
-  def relu(self):
-    return Relu.apply(self)
+  @property
+  def T(self):
+    return Tensor(self.data.T)
 
-  def tanh(self):
-    return Tanh.apply(self)
+  @property
+  def dtype(self):
+    return self.data.dtype
+
+  @staticmethod
+  def rand(*shape):
+    return Tensor(np.random.randn(*shape))
+
+  @staticmethod
+  def ones_like(*shape) -> Tensor:
+    return Tensor(np.ones(shape))
+
+  @staticmethod
+  def zeros_like(*shape) -> Tensor:
+    return Tensor(np.zeros(shape))
 
   def add(self, other):
     return Add.apply(self, other)
@@ -29,14 +41,26 @@ class Tensor:
   def sum(self):
     return Sum.apply(self)
 
-  def mul(self, other):
-    return Mul.apply(self, other)
-
-  def matmul(self, other):
-    return Matmul.apply(self, other)
+  # def relu(self):
+  #   return Relu.apply(self)
+  #
+  # def tanh(self):
+  #   return Tanh.apply(self)
+  #
+  # def logsoftmax(self):
+  #   return LogSoftmax.apply(self)
+  #
+  #
+  # def mul(self, other):
+  #   return Mul.apply(self, other)
+  #
+  # def matmul(self, other):
+  #   return Matmul.apply(self, other)
 
   def __repr__(self):
-    return f"Tensor(data={self.data}, grad={self.grad})"
+    shape = self.data.shape if self.data.ndim else f"data={self.data}"
+    grad = f" with grad {self.grad.shape}" if self.grad is not None else ""
+    return f"Tensor({shape}{grad})"
 
   def deepwalk(self) -> list[Tensor]:
     def _deepwalk(node, visited, nodes):
@@ -52,14 +76,14 @@ class Tensor:
 
   def backward(self):
     assert self.data.ndim == 0, "only scalar can be backwarded"
-    self.grad = 1.0
+    self.grad = Tensor(1.0)
     for prev in reversed(self.deepwalk()):
       assert isinstance(prev._ctx, Function), f"ctx is None for {prev}"
       prev._ctx.backward(prev.grad)
 
   __add__ = add
-  __mul__ = mul
-  __matmul__ = matmul
+  # __mul__ = mul
+  # __matmul__ = matmul
 
 
 class Function:
@@ -73,61 +97,82 @@ class Function:
     raise NotImplementedError(f"backward not implemented for {type(self)}")
 
   @classmethod
-  def apply(cls, *x: Tensor, **kwargs):
-    fxn: Function = cls(*x)
-    res: Tensor = fxn.forward(*[t.data for t in x], **kwargs)
+  def apply(cls, *x: Union[Tensor, int, float, np.ndarray], **kwargs):
+    ensure_tensor = lambda x: x if isinstance(x, Tensor) else Tensor(x)
+    tensors = [ensure_tensor(t) for t in x]
+    fxn: Function = cls(*tensors)
+    res: Tensor = fxn.forward(*[t.data for t in tensors], **kwargs)
     res._ctx = fxn
     return res
 
 
-class Relu(Function):
-  def forward(self, x):
-    return Tensor(np.maximum(x, 0))
-
-
-class Tanh(Function):
-  def forward(self, x):
-    res = Tensor(np.tanh(x))
-    self.res = res
-    return res
-
-  def backward(self, out_grad):
-    self.prev[0].grad = out_grad * (1 - self.res.data**2)
-
-
 class Add(Function):
-  def forward(self, x, y):
+  def forward(self, x, y) -> Tensor:
     return Tensor(x + y)
 
-  def backward(self, out_grad):
-    for prev in self.prev:
-      if prev.shape != out_grad.shape:
-        prev.grad = np.sum(out_grad, axis=0, keepdims=True)
-      else:
-        prev.grad = out_grad
+  def backward(self, out_grad: Tensor):
+    # np.sum is reduce, opposite of implicit broadcast of numpy's x+y
+    for tensor in (self.prev[0], self.prev[1]):
+      tensor.grad = (
+        out_grad
+        if tensor.shape == out_grad.shape
+        else Tensor(np.sum(out_grad.data, axis=0))
+      )
 
 
 class Sum(Function):
-  def forward(self, x):
+  def forward(self, x) -> Tensor:
     return Tensor(np.sum(x))
 
-  def backward(self, out_grad):
-    self.prev[0].grad = np.broadcast_to(out_grad, self.prev[0].data.shape)
+  def backward(self, out_grad: Tensor):
+    x = self.prev[0]
+    x.grad = Tensor(np.broadcast_to(out_grad.data, x.shape))
 
 
-class Mul(Function):
-  def forward(self, x, y):
-    return Tensor(x * y)
+# class Relu(Function):
+#   def forward(self, x) -> Tensor:
+#     return Tensor(np.maximum(x, 0))
+#
+#
+# class Tanh(Function):
+#   def forward(self, x) -> Tensor:
+#     res = Tensor(np.tanh(x))
+#     self.res = res
+#     return res
+#
+#   def backward(self, out_grad: Tensor):
+#     self.prev[0].grad = out_grad * (1 - self.res.data**2)
+#
+#
+# class LogSoftmax(Function):
+#   def forward(self, x) -> Tensor:
+#     if x.ndim == 1:
+#       x = x.reshape(1, -1)
+#     max_x = np.max(x, axis=1, keepdims=True)
+#     exp_x = np.exp(x - max_x)
+#     sum_exp_x = np.sum(exp_x, axis=1, keepdims=True)
+#     log_sum_exp = np.log(sum_exp_x) + max_x
+#     res = x - log_sum_exp
+#
+#     self.res = res
+#     return Tensor(res)
 
-  def backward(self, out_grad):
-    self.prev[0].grad = out_grad * self.prev[1].data
-    self.prev[1].grad = out_grad * self.prev[0].data
 
-
-class Matmul(Function):
-  def forward(self, x, y):
-    return Tensor(x @ y)
-
-  def backward(self, out_grad):
-    self.prev[0].grad = out_grad @ self.prev[1].data.T
-    self.prev[1].grad = (out_grad.T @ self.prev[0].data).T
+#
+#
+# class Mul(Function):
+#   def forward(self, x, y) -> Tensor:
+#     return Tensor(x * y)
+#
+#   def backward(self, out_grad: Tensor):
+#     self.prev[0].grad = out_grad * self.prev[1].data
+#     self.prev[1].grad = out_grad * self.prev[0].data
+#
+#
+# class Matmul(Function):
+#   def forward(self, x, y) -> Tensor:
+#     return Tensor(x @ y)
+#
+#   def backward(self, out_grad: Tensor):
+#     self.prev[0].grad = out_grad @ self.prev[1].T
+#     self.prev[1].grad = (out_grad.T @ self.prev[0].data).T
