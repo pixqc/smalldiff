@@ -41,6 +41,9 @@ class Tensor:
   def sum(self):
     return Sum.apply(self)
 
+  def matmul(self, other):
+    return Matmul.apply(self, other)
+
   # def relu(self):
   #   return Relu.apply(self)
   #
@@ -82,7 +85,7 @@ class Tensor:
 
   __add__ = add
   # __mul__ = mul
-  # __matmul__ = matmul
+  __matmul__ = matmul
 
 
 class Function:
@@ -126,6 +129,16 @@ class Sum(Function):
   def backward(self, out_grad: Tensor):
     x = self.prev[0]
     x.grad = Tensor(np.broadcast_to(out_grad.data, x.shape))
+
+
+class Matmul(Function):
+  def forward(self, x, y) -> Tensor:
+    return Tensor(x @ y)
+
+  def backward(self, out_grad: Tensor):
+    x, y = self.prev
+    x.grad = Tensor(out_grad.data @ y.data.T)
+    y.grad = Tensor(x.T.data @ out_grad.data)
 
 
 # class Relu(Function):
