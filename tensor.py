@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import List, Optional, Union
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -46,6 +46,18 @@ class Tensor:
   def zeros_like(*shape) -> Tensor:
     return Tensor(np.zeros(shape))
 
+  def _broadcast(
+    self, x: Union[Tensor, int, float, np.ndarray, List]
+  ) -> Tuple[Tensor, Tensor]:
+    if not isinstance(x, Tensor):
+      x = Tensor(x)
+    if self.shape == x.shape:
+      return self, x
+    elif self.shape > x.shape:
+      return self, Tensor(np.broadcast_to(x.data, self.shape))
+    else:
+      return Tensor(np.broadcast_to(self.data, x.shape)), x
+
   # fmt: off
   # ----- primitive operations -----
   # unary
@@ -56,35 +68,35 @@ class Tensor:
   def neg(self): return self * (-1)
 
   # binary
-  def add(self, other): return Add.apply(self, other)
-  def mul(self, other): return Mul.apply(self, other)
-  def sub(self, other): return self + (-other)
-  def div(self, other): return self * other.reciprocal()
-  def max(self, axis=-1, keepdim=False): return Max.apply(self, axis=axis, keepdim=keepdim)
+  def add(self, x): return Add.apply(*self._broadcast(x))
+  def mul(self, x): return Mul.apply(*self._broadcast(x))
+  def sub(self, x): return self + (-x)
+  def div(self, x): return self * x.reciprocal()
 
   # reduce
-  def sum(self, axis=-1, keepdim=False): return Sum.apply(self, axis=axis, keepdim=keepdim)
-  def mean(self, axis=-1, keepdim=False): return Mean.apply(self, axis=axis, keepdim=keepdim)
+  def max(self, axis=None, keepdim=False): return Max.apply(self, axis=axis, keepdim=keepdim)
+  def sum(self, axis=None, keepdim=False): return Sum.apply(self, axis=axis, keepdim=keepdim)
+  def mean(self, axis=None, keepdim=False): return Mean.apply(self, axis=axis, keepdim=keepdim)
   # fmt: on
 
   # ----- composite operations -----
 
-  def dot(self, other):
+  def dot(self, x):
     pass  # TODO: impl
 
-  def matmul(self, other):
-    return self.dot(other)
+  def matmul(self, x):
+    return self.dot(x)
 
   def _softmax(self, axis):
     m = self - self.max(axis=axis, keepdim=True)
     e = m.exp()
     return m, e, e.sum(axis=axis, keepdim=True)
 
-  def softmax(self, axis=-1):
+  def softmax(self, axis=None):
     _, e, ss = self._softmax(axis)
     return e.div(ss)
 
-  def log_softmax(self, axis=-1):
+  def log_softmax(self, axis=None):
     m, _, ss = self._softmax(axis)
     return m - ss.log()
 
@@ -147,12 +159,15 @@ class Add(Function):
 
   def backward(self, out_grad: Tensor):
     # np.sum is reduce, opposite of implicit broadcast of numpy's x+y
-    for tensor in (self.prev[0], self.prev[1]):
-      tensor.grad = (
-        out_grad
-        if tensor.shape == out_grad.shape
-        else Tensor(np.sum(out_grad.data, axis=0))
-      )
+    self.prev[0].grad = out_grad
+    self.prev[1].grad = out_grad
+
+    # for tensor in (self.prev[0], self.prev[1]):
+    #   tensor.grad = (
+    #     out_grad
+    #     if tensor.shape == out_grad.shape
+    #     else Tensor(np.sum(out_grad.data, axis=0))
+    #   )
 
 
 class Sum(Function):
@@ -179,7 +194,7 @@ class Mul(Function):
 
 
 class Mean(Function):
-  def forward(self, x, axis=-1, keepdim=False) -> Tensor:
+  def forward(self, x, axis=None, keepdim=False) -> Tensor:
     return Tensor(np.mean(x, axis=axis, keepdims=keepdim))
 
 
@@ -192,7 +207,7 @@ class Relu(Function):
 
 
 class Max(Function):
-  def forward(self, x, axis=-1, keepdim=False) -> Tensor:
+  def forward(self, x, axis=None, keepdim=False) -> Tensor:
     return Tensor(np.max(x, axis=axis, keepdims=keepdim))
 
   # def backward(self, out_grad: Tensor):
