@@ -1,8 +1,19 @@
 from __future__ import annotations
 
+from enum import Enum
 from typing import List, Optional, Union
 
 import numpy as np
+
+# not used (for now), just for reference
+UnaryOps = Enum("UnaryOps", ["EXP2", "LOG2", "CAST", "BITCAST", "SIN", "SQRT", "RECIP"])
+BinaryOps = Enum("BinaryOps", ["ADD", "MUL", "IDIV", "MAX", "MOD", "CMPLT", "CMPNE", "XOR"])  # fmt: skip
+ReduceOps = Enum("ReduceOps", ["SUM", "PROD", "MAX"])
+TernaryOps = Enum("TernaryOps", ["WHERE", "MULACC"])
+MetaOps = Enum("MetaOps", ["EMPTY", "CONST", "COPY", "CONTIGUOUS", "CUSTOM", "ASSIGN", "VIEW"])  # fmt: skip
+# MovementOps doesn't actually exist in tinygrad
+MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "SHRINK", "STRIDE", "EXPAND", "PAD"])  # fmt: skip
+Op = Union[UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps]
 
 
 class Tensor:
@@ -35,45 +46,34 @@ class Tensor:
   def zeros_like(*shape) -> Tensor:
     return Tensor(np.zeros(shape))
 
-  # primitive operations
+  # fmt: off
+  # ----- primitive operations -----
+  # unary
+  def relu(self): return Relu.apply(self)
+  def recip(self): return Recip.apply(self)
+  def log(self): return Log.apply(self)
+  def exp(self): return Exp.apply(self)
+  def neg(self): return self * (-1)
 
-  def add(self, other):
-    return Add.apply(self, other)
+  # binary
+  def add(self, other): return Add.apply(self, other)
+  def mul(self, other): return Mul.apply(self, other)
+  def sub(self, other): return self + (-other)
+  def div(self, other): return self * other.reciprocal()
+  def max(self, axis=-1, keepdim=False): return Max.apply(self, axis=axis, keepdim=keepdim)
 
-  def sub(self, other):
-    return self + (-other)
+  # reduce
+  def sum(self, axis=-1, keepdim=False): return Sum.apply(self, axis=axis, keepdim=keepdim)
+  def mean(self, axis=-1, keepdim=False): return Mean.apply(self, axis=axis, keepdim=keepdim)
+  # fmt: on
 
-  def sum(self, axis=None, keepdim=False):
-    return Sum.apply(self, axis=axis, keepdim=keepdim)
+  # ----- composite operations -----
 
-  def mul(self, other):
-    return Mul.apply(self, other)
-
-  def mean(self):
-    return Mean.apply(self)
+  def dot(self, other):
+    pass  # TODO: impl
 
   def matmul(self, other):
-    return Matmul.apply(self, other)
-
-  def div(self, other):
-    return Div.apply(self, other)
-
-  def relu(self):
-    return Relu.apply(self)
-
-  def max(self, axis=-1, keepdim=False):
-    return Max.apply(self, axis=axis, keepdim=keepdim)
-
-  def neg(self):
-    return Neg.apply(self)
-
-  def log(self):
-    return Log.apply(self)
-
-  def exp(self):
-    return Exp.apply(self)
-
-  # composite operations
+    return self.dot(other)
 
   def _softmax(self, axis):
     m = self - self.max(axis=axis, keepdim=True)
@@ -88,9 +88,14 @@ class Tensor:
     m, _, ss = self._softmax(axis)
     return m - ss.log()
 
-  def __repr__(self):
-    grad_repr = self.grad.data if self.grad else None
-    return f"<Tensor {self.data!r} with grad {grad_repr!r}>"
+  __add__ = add
+  __mul__ = mul
+  __sub__ = sub
+  __neg__ = neg
+  __pow__ = pow
+  __matmul__ = matmul
+
+  # ----- backward -----
 
   def deepwalk(self) -> list[Tensor]:
     def _deepwalk(node, visited, nodes):
@@ -111,11 +116,9 @@ class Tensor:
       assert isinstance(prev._ctx, Function), f"ctx is None for {prev}"
       prev._ctx.backward(prev.grad)
 
-  __add__ = add
-  __mul__ = mul
-  __sub__ = sub
-  __neg__ = neg
-  __matmul__ = matmul
+  def __repr__(self):
+    grad_repr = self.grad.data if self.grad else None
+    return f"<Tensor {self.data!r} with grad {grad_repr!r}>"
 
 
 class Function:
@@ -161,19 +164,9 @@ class Sum(Function):
     x.grad = Tensor(np.broadcast_to(out_grad.data, x.shape))
 
 
-class Matmul(Function):
-  def forward(self, x, y) -> Tensor:
-    return Tensor(x @ y)
-
-  def backward(self, out_grad: Tensor):
-    x, y = self.prev
-    x.grad = Tensor(out_grad.data @ y.data.T)
-    y.grad = Tensor(x.T.data @ out_grad.data)
-
-
-class Div(Function):
-  def forward(self, x, y) -> Tensor:
-    return Tensor(x / y)
+class Recip(Function):
+  def forward(self, x) -> Tensor:
+    return Tensor(1 / x)
 
 
 class Mul(Function):
@@ -186,8 +179,8 @@ class Mul(Function):
 
 
 class Mean(Function):
-  def forward(self, x) -> Tensor:
-    return Tensor(np.mean(x))
+  def forward(self, x, axis=-1, keepdim=False) -> Tensor:
+    return Tensor(np.mean(x, axis=axis, keepdims=keepdim))
 
 
 class Relu(Function):
@@ -202,16 +195,8 @@ class Max(Function):
   def forward(self, x, axis=-1, keepdim=False) -> Tensor:
     return Tensor(np.max(x, axis=axis, keepdims=keepdim))
 
-  def backward(self, out_grad: Tensor):
-    self.prev[0].grad = Tensor(np.zeros_like(self.prev[0].data))
-
-
-class Neg(Function):
-  def forward(self, x) -> Tensor:
-    return Tensor(-x)
-
   # def backward(self, out_grad: Tensor):
-  #   self.prev[0].grad = -out_grad
+  #   self.prev[0].grad = Tensor(np.zeros_like(self.prev[0].data))
 
 
 class Log(Function):
@@ -225,12 +210,3 @@ class Log(Function):
 class Exp(Function):
   def forward(self, x) -> Tensor:
     return Tensor(np.exp(x))
-
-
-#
-# # https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html
-# class SparseCategoricalCrossEntropy(Function):
-#   def forward(self, y_pred, y_gt) -> Tensor:
-#     preds = y_pred[np.arange(y_gt.shape[0]), y_gt]
-#     out = -np.log(preds + 1e-8).mean()
-#     return Tensor(out)
