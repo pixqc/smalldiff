@@ -63,6 +63,7 @@ class Tensor:
   def log(self): return Log.apply(self)
   def exp(self): return Exp.apply(self)
   def neg(self): return self * (-1)
+  def reciprocal(self): return self.recip()  # tinygrad compat
 
   # binary
   def add(self, x): return Add.apply(self, x)
@@ -97,6 +98,10 @@ class Tensor:
   def log_softmax(self, axis=-1):
     m, _, ss = self._softmax(axis)
     return m - ss.log()
+
+  def sparse_categorical_crossentropy(self, y):
+    y = np.eye(10)[y.data]  # one hot
+    return self.softmax().log().mul(y).sum().neg().mean()
 
   __add__ = add
   __mul__ = mul
@@ -178,7 +183,11 @@ class Sum(Function):
 
 class Recip(Function):
   def forward(self, x) -> Tensor:
+    self.x = x
     return Tensor(1 / x)
+
+  def backward(self, out_grad: Tensor):
+    self.prev[0].grad = Tensor(-out_grad.data / (np.pow(self.x.data, 2)))
 
 
 class Mul(Function):
@@ -192,7 +201,13 @@ class Mul(Function):
 
 class Mean(Function):
   def forward(self, x, axis=None, keepdim=False) -> Tensor:
+    self.x = x
+    self.axis = axis
     return Tensor(np.mean(x, axis=axis, keepdims=keepdim))
+
+  def backward(self, out_grad: Tensor):
+    x = self.x.data
+    self.prev[0].grad = Tensor(x / x.shape[self.axis] * out_grad.data)
 
 
 class Relu(Function):
@@ -205,23 +220,24 @@ class Relu(Function):
 
 class Max(Function):
   def forward(self, x, axis=None, keepdim=False) -> Tensor:
-    self.original = x
+    self.x = x
     self.axis = axis
     return Tensor(np.max(x, axis=axis, keepdims=keepdim))
 
   def backward(self, out_grad: Tensor):
-    max_idx = np.argmax(self.original.data, axis=self.axis)
-    res = np.zeros_like(self.original)
+    max_idx = np.argmax(self.x.data, axis=self.axis)
+    res = np.zeros_like(self.x)
     res[max_idx] = 1 * out_grad.data
     self.prev[0].grad = Tensor(res)
 
 
 class Log(Function):
   def forward(self, x) -> Tensor:
+    self.x = x
     return Tensor(np.log(x))
 
   def backward(self, out_grad: Tensor):
-    self.prev[0].grad = Tensor(out_grad.data / self.prev[0].data)
+    self.prev[0].grad = Tensor(out_grad.data / self.x.data)
 
 
 class Exp(Function):
