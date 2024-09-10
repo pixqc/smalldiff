@@ -118,18 +118,29 @@ class TestGrad(unittest.TestCase):
     assert isinstance(x.grad, Tensor)
     self.assertTrue(np.allclose(x.grad.data, x_tiny.grad.numpy()))
 
-  # def test_logsoftmax_00(self):
-  #   # testing max, exp, sum
-  #   x_np = np.random.randn(3, 4).astype(np.float32)
-  #   x = Tensor(x_np, requires_grad=True)
-  #   out = x.log_softmax().sum()
-  #   out.backward()
-  #
-  #   x_tiny = TinyTensor(x_np, requires_grad=True)
-  #   out_tiny = x_tiny.log_softmax().sum()
-  #   out_tiny.backward()
-  #
-  #   print(x.grad.numpy())
-  #   print(x_tiny.grad.numpy())
-  #   assert isinstance(x.grad, Tensor)
-  #   self.assertTrue(np.allclose(x.grad.data, x_tiny.grad.numpy()))
+  def test_log_00(self):
+    x_np = np.array([1, 2, 3]).astype(np.float32)
+    x = Tensor(x_np, requires_grad=True)
+    out = x.log().sum()
+    out.backward()
+
+    x_tiny = TinyTensor(x_np, requires_grad=True)
+    out_tiny = x_tiny.log().sum()
+    out_tiny.backward()
+
+    assert isinstance(x.grad, Tensor)
+    self.assertTrue(np.allclose(x.grad.data, x_tiny.grad.numpy()))
+
+  def test_logsoftmax_00(self):
+    # testing max, exp, sum
+    x_np = np.random.randn(3, 4).astype(np.float32)
+    x = Tensor(x_np, requires_grad=True)
+    out = x.log_softmax().sum()
+    out.backward()
+
+    x_tiny = TinyTensor(x_np, requires_grad=True)
+    out_tiny = x_tiny.log_softmax().sum()
+    out_tiny.backward()
+
+    assert isinstance(x.grad, Tensor)
+    self.assertTrue(np.allclose(x.grad.data, x_tiny.grad.numpy()))
