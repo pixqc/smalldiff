@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import Optional, Union
+from typing import List, Optional, Union
 
 import numpy as np
 
 
 class Tensor:
-  def __init__(self, data, dtype=None):
+  def __init__(self, data: Union[Tensor, int, float, np.ndarray, List], dtype=None):
     self.data = np.array(data, dtype=dtype)
     self.grad: Optional[Tensor] = None
     self._ctx: Optional[Function] = None
@@ -35,28 +35,58 @@ class Tensor:
   def zeros_like(*shape) -> Tensor:
     return Tensor(np.zeros(shape))
 
+  # primitive operations
+
   def add(self, other):
     return Add.apply(self, other)
 
-  def sum(self):
-    return Sum.apply(self)
+  def sub(self, other):
+    return self + (-other)
+
+  def sum(self, axis=None, keepdim=False):
+    return Sum.apply(self, axis=axis, keepdim=keepdim)
+
+  def mul(self, other):
+    return Mul.apply(self, other)
+
+  def mean(self):
+    return Mean.apply(self)
 
   def matmul(self, other):
     return Matmul.apply(self, other)
 
+  def div(self, other):
+    return Div.apply(self, other)
+
   def relu(self):
     return Relu.apply(self)
 
-  def softmax(self):
-    return Softmax.apply(self)
+  def max(self, axis=-1, keepdim=False):
+    return Max.apply(self, axis=axis, keepdim=keepdim)
 
-  #
-  #
-  # def mul(self, other):
-  #   return Mul.apply(self, other)
-  #
-  # def matmul(self, other):
-  #   return Matmul.apply(self, other)
+  def neg(self):
+    return Neg.apply(self)
+
+  def log(self):
+    return Log.apply(self)
+
+  def exp(self):
+    return Exp.apply(self)
+
+  # composite operations
+
+  def _softmax(self, axis):
+    m = self - self.max(axis=axis, keepdim=True)
+    e = m.exp()
+    return m, e, e.sum(axis=axis, keepdim=True)
+
+  def softmax(self, axis=-1):
+    _, e, ss = self._softmax(axis)
+    return e.div(ss)
+
+  def log_softmax(self, axis=-1):
+    m, _, ss = self._softmax(axis)
+    return m - ss.log()
 
   def __repr__(self):
     grad_repr = self.grad.data if self.grad else None
@@ -82,7 +112,9 @@ class Tensor:
       prev._ctx.backward(prev.grad)
 
   __add__ = add
-  # __mul__ = mul
+  __mul__ = mul
+  __sub__ = sub
+  __neg__ = neg
   __matmul__ = matmul
 
 
@@ -97,7 +129,7 @@ class Function:
     raise NotImplementedError(f"backward not implemented for {type(self)}")
 
   @classmethod
-  def apply(cls, *x: Union[Tensor, int, float, np.ndarray], **kwargs):
+  def apply(cls, *x: Union[Tensor, int, float, np.ndarray, List], **kwargs):
     ensure_tensor = lambda x: x if isinstance(x, Tensor) else Tensor(x)
     tensors = [ensure_tensor(t) for t in x]
     fxn: Function = cls(*tensors)
@@ -121,8 +153,8 @@ class Add(Function):
 
 
 class Sum(Function):
-  def forward(self, x) -> Tensor:
-    return Tensor(np.sum(x))
+  def forward(self, x, axis=None, keepdim=False) -> Tensor:
+    return Tensor(np.sum(x, axis=axis, keepdims=keepdim))
 
   def backward(self, out_grad: Tensor):
     x = self.prev[0]
@@ -139,6 +171,25 @@ class Matmul(Function):
     y.grad = Tensor(x.T.data @ out_grad.data)
 
 
+class Div(Function):
+  def forward(self, x, y) -> Tensor:
+    return Tensor(x / y)
+
+
+class Mul(Function):
+  def forward(self, x, y) -> Tensor:
+    return Tensor(x * y)
+
+  # def backward(self, out_grad: Tensor):
+  #   self.prev[0].grad = out_grad * self.prev[1].data
+  #   self.prev[1].grad = out_grad * self.prev[0].data
+
+
+class Mean(Function):
+  def forward(self, x) -> Tensor:
+    return Tensor(np.mean(x))
+
+
 class Relu(Function):
   def forward(self, x) -> Tensor:
     return Tensor(np.maximum(x, 0))
@@ -147,39 +198,39 @@ class Relu(Function):
     self.prev[0].grad = Tensor(out_grad.data * (self.prev[0].data > 0))
 
 
-class Softmax(Function):
-  def forward(self, x) -> Tensor:
-    if x.ndim == 1:
-      x = x.reshape(1, -1)
-    max_x = np.max(x, axis=1, keepdims=True)
-    exp_x = np.exp(x - max_x)
-    sum_exp_x = np.sum(exp_x, axis=1, keepdims=True)
-    res = exp_x / sum_exp_x
-    self.res = res
-    return Tensor(res)
+class Max(Function):
+  def forward(self, x, axis=-1, keepdim=False) -> Tensor:
+    return Tensor(np.max(x, axis=axis, keepdims=keepdim))
 
   def backward(self, out_grad: Tensor):
-    grad = self.res * (
-      out_grad.data - np.sum(out_grad.data * self.res, axis=1, keepdims=True)
-    )
-    self.prev[0].grad = Tensor(grad)
+    self.prev[0].grad = Tensor(np.zeros_like(self.prev[0].data))
+
+
+class Neg(Function):
+  def forward(self, x) -> Tensor:
+    return Tensor(-x)
+
+  # def backward(self, out_grad: Tensor):
+  #   self.prev[0].grad = -out_grad
+
+
+class Log(Function):
+  def forward(self, x) -> Tensor:
+    return Tensor(np.log(x))
+
+  # def backward(self, out_grad: Tensor):
+  #   self.prev[0].grad = out_grad / self.prev[0].data
+
+
+class Exp(Function):
+  def forward(self, x) -> Tensor:
+    return Tensor(np.exp(x))
 
 
 #
-#
-# class Mul(Function):
-#   def forward(self, x, y) -> Tensor:
-#     return Tensor(x * y)
-#
-#   def backward(self, out_grad: Tensor):
-#     self.prev[0].grad = out_grad * self.prev[1].data
-#     self.prev[1].grad = out_grad * self.prev[0].data
-#
-#
-# class Matmul(Function):
-#   def forward(self, x, y) -> Tensor:
-#     return Tensor(x @ y)
-#
-#   def backward(self, out_grad: Tensor):
-#     self.prev[0].grad = out_grad @ self.prev[1].T
-#     self.prev[1].grad = (out_grad.T @ self.prev[0].data).T
+# # https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html
+# class SparseCategoricalCrossEntropy(Function):
+#   def forward(self, y_pred, y_gt) -> Tensor:
+#     preds = y_pred[np.arange(y_gt.shape[0]), y_gt]
+#     out = -np.log(preds + 1e-8).mean()
+#     return Tensor(out)
