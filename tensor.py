@@ -17,10 +17,16 @@ Op = Union[UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps]
 
 
 class Tensor:
-  def __init__(self, data: Union[Tensor, int, float, np.ndarray, List], dtype=None):
+  def __init__(
+    self,
+    data: Union[Tensor, int, float, np.ndarray, List],
+    dtype=None,
+    requires_grad=False,
+  ):
     self.data = np.array(data, dtype=dtype)
     self.grad: Optional[Tensor] = None
     self._ctx: Optional[Function] = None
+    self.requires_grad = requires_grad
 
   @property
   def shape(self):
@@ -46,6 +52,9 @@ class Tensor:
   def zeros_like(*shape) -> Tensor:
     return Tensor(np.zeros(shape))
 
+  def numpy(self):
+    return self.data
+
   # fmt: off
   # ----- primitive operations -----
   # unary
@@ -59,7 +68,7 @@ class Tensor:
   def add(self, x): return Add.apply(self, x)
   def mul(self, x): return Mul.apply(self, x)
   def sub(self, x): return self + (-x)
-  def div(self, x): return self * x.reciprocal()
+  def div(self, x): return self * x.recip()
 
   # reduce
   def max(self, axis=None, keepdim=False): return Max.apply(self, axis=axis, keepdim=keepdim)
@@ -124,6 +133,7 @@ class Tensor:
 class Function:
   def __init__(self, *tensors: Tensor):
     self.prev = tensors
+    self.requires_grad = any([t.requires_grad for t in tensors])
 
   def forward(self, *args, **kwargs):
     raise NotImplementedError(f"forward not implemented for {type(self)}")
@@ -135,9 +145,10 @@ class Function:
   def apply(cls, *x: Union[Tensor, int, float, np.ndarray, List], **kwargs):
     ensure_tensor = lambda x: x if isinstance(x, Tensor) else Tensor(x)
     tensors = [ensure_tensor(t) for t in x]
-    fxn: Function = cls(*tensors)
-    res: Tensor = fxn.forward(*[t.data for t in tensors], **kwargs)
-    res._ctx = fxn
+    fn: Function = cls(*tensors)
+    res: Tensor = fn.forward(*[t.data for t in tensors], **kwargs)
+    res.requires_grad = fn.requires_grad
+    res._ctx = fn if fn.requires_grad else None
     return res
 
 
