@@ -78,8 +78,9 @@ class Tensor:
 
   # ----- composite operations -----
 
+  # TODO: can be impl'd by composing mul, add, reshape: see Tinygrad Tensor.dot
   def dot(self, x):
-    pass  # TODO: impl
+    return Dot.apply(self, x)
 
   def matmul(self, x):
     return self.dot(x)
@@ -89,11 +90,11 @@ class Tensor:
     e = m.exp()
     return m, e, e.sum(axis=axis, keepdim=True)
 
-  def softmax(self, axis=None):
+  def softmax(self, axis=-1):
     _, e, ss = self._softmax(axis)
     return e.div(ss)
 
-  def log_softmax(self, axis=None):
+  def log_softmax(self, axis=-1):
     m, _, ss = self._softmax(axis)
     return m - ss.log()
 
@@ -133,7 +134,8 @@ class Tensor:
 class Function:
   def __init__(self, *tensors: Tensor):
     self.prev = tensors
-    self.requires_grad = any([t.requires_grad for t in tensors])
+    # TODO: requires_grad impl still buggy btw
+    # self.requires_grad = any([t.requires_grad for t in tensors])
 
   def forward(self, *args, **kwargs):
     raise NotImplementedError(f"forward not implemented for {type(self)}")
@@ -147,8 +149,7 @@ class Function:
     tensors = [ensure_tensor(t) for t in x]
     fn: Function = cls(*tensors)
     res: Tensor = fn.forward(*[t.data for t in tensors], **kwargs)
-    res.requires_grad = fn.requires_grad
-    res._ctx = fn if fn.requires_grad else None
+    res._ctx = fn
     return res
 
 
@@ -162,7 +163,7 @@ class Add(Function):
       tensor.grad = (
         out_grad
         if tensor.shape == out_grad.shape
-        else Tensor(np.sum(out_grad.data, axis=0))
+        else Tensor(np.sum(out_grad.data, axis=0))  # correct axis?
       )
 
 
@@ -184,9 +185,9 @@ class Mul(Function):
   def forward(self, x, y) -> Tensor:
     return Tensor(x * y)
 
-  # def backward(self, out_grad: Tensor):
-  #   self.prev[0].grad = out_grad * self.prev[1].data
-  #   self.prev[1].grad = out_grad * self.prev[0].data
+  def backward(self, out_grad: Tensor):
+    self.prev[0].grad = Tensor(out_grad.data * self.prev[1].data)
+    self.prev[1].grad = Tensor(out_grad.data * self.prev[0].data)
 
 
 class Mean(Function):
@@ -204,20 +205,39 @@ class Relu(Function):
 
 class Max(Function):
   def forward(self, x, axis=None, keepdim=False) -> Tensor:
+    self.original = x
+    self.axis = axis
     return Tensor(np.max(x, axis=axis, keepdims=keepdim))
 
-  # def backward(self, out_grad: Tensor):
-  #   self.prev[0].grad = Tensor(np.zeros_like(self.prev[0].data))
+  def backward(self, out_grad: Tensor):
+    max_idx = np.argmax(self.original.data, axis=self.axis)
+    res = np.zeros_like(self.original)
+    res[max_idx] = 1 * out_grad.data
+    self.prev[0].grad = Tensor(res)
 
 
 class Log(Function):
   def forward(self, x) -> Tensor:
     return Tensor(np.log(x))
 
-  # def backward(self, out_grad: Tensor):
-  #   self.prev[0].grad = out_grad / self.prev[0].data
+  def backward(self, out_grad: Tensor):
+    self.prev[0].grad = Tensor(out_grad.data / self.prev[0].data)
 
 
 class Exp(Function):
   def forward(self, x) -> Tensor:
-    return Tensor(np.exp(x))
+    self.res = Tensor(np.exp(x))
+    return self.res
+
+  def backward(self, out_grad: Tensor):
+    self.prev[0].grad = Tensor(out_grad.data * self.res.data)
+
+
+class Dot(Function):
+  def forward(self, x, y) -> Tensor:
+    return Tensor(x @ y)
+
+  def backward(self, out_grad: Tensor):
+    x, y = self.prev
+    x.grad = Tensor(out_grad.data @ y.data.T)
+    y.grad = Tensor(x.T.data @ out_grad.data)
