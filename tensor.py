@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Union
 
 import numpy as np
 
@@ -46,18 +46,6 @@ class Tensor:
   def zeros_like(*shape) -> Tensor:
     return Tensor(np.zeros(shape))
 
-  def _broadcast(
-    self, x: Union[Tensor, int, float, np.ndarray, List]
-  ) -> Tuple[Tensor, Tensor]:
-    if not isinstance(x, Tensor):
-      x = Tensor(x)
-    if self.shape == x.shape:
-      return self, x
-    elif self.shape > x.shape:
-      return self, Tensor(np.broadcast_to(x.data, self.shape))
-    else:
-      return Tensor(np.broadcast_to(self.data, x.shape)), x
-
   # fmt: off
   # ----- primitive operations -----
   # unary
@@ -68,8 +56,8 @@ class Tensor:
   def neg(self): return self * (-1)
 
   # binary
-  def add(self, x): return Add.apply(*self._broadcast(x))
-  def mul(self, x): return Mul.apply(*self._broadcast(x))
+  def add(self, x): return Add.apply(self, x)
+  def mul(self, x): return Mul.apply(self, x)
   def sub(self, x): return self + (-x)
   def div(self, x): return self * x.reciprocal()
 
@@ -159,15 +147,12 @@ class Add(Function):
 
   def backward(self, out_grad: Tensor):
     # np.sum is reduce, opposite of implicit broadcast of numpy's x+y
-    self.prev[0].grad = out_grad
-    self.prev[1].grad = out_grad
-
-    # for tensor in (self.prev[0], self.prev[1]):
-    #   tensor.grad = (
-    #     out_grad
-    #     if tensor.shape == out_grad.shape
-    #     else Tensor(np.sum(out_grad.data, axis=0))
-    #   )
+    for tensor in (self.prev[0], self.prev[1]):
+      tensor.grad = (
+        out_grad
+        if tensor.shape == out_grad.shape
+        else Tensor(np.sum(out_grad.data, axis=0))
+      )
 
 
 class Sum(Function):
