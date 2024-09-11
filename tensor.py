@@ -104,11 +104,11 @@ class Tensor:
 
   def log_softmax(self, axis=-1):
     m, _, ss = self._softmax(axis)
-    return m - ss.log()
+    return m - (ss).log()
 
   def sparse_categorical_crossentropy(self, y):
-    y = np.eye(10)[y.data]  # one hot
-    return self.softmax().log().mul(y).sum().neg().mean()
+    y = np.eye(y.shape[0])[y.data]  # one hot
+    return -self.log_softmax().mul(y).mean().mul(Tensor(y.shape[0]))  # hack?
 
   # ----- backward -----
 
