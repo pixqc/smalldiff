@@ -104,8 +104,7 @@ class TestGrad(unittest.TestCase):
       ((3, 4), (4, 2)),
       # ((2, 3, 4), (4, 5)),  # TODO: not supported yet
       # ((1, 2, 3, 4), (4, 5)),
-    ]
-    for shape_pair in shapes:
+    ]:
       self._test_binary_matmul(shape_pair)
 
   def _test_reduce(self, func_name: str, shape: tuple[int, ...], axis: Optional[int]):
