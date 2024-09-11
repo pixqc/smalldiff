@@ -24,7 +24,7 @@ class TestGrad(unittest.TestCase):
     assert isinstance(x.grad, Tensor)
     assert isinstance(x_tiny.grad, TinyTensor)
     self.assertTrue(x.grad.shape == x_tiny.grad.shape)
-    self.assertTrue(np.allclose(x.grad.data, x_tiny.grad.numpy()))
+    self.assertTrue(np.allclose(x.grad.numpy(), x_tiny.grad.numpy()))
 
   def test_unary(self):
     for func_name in ["relu", "log", "exp", "neg", "reciprocal"]:
@@ -54,8 +54,8 @@ class TestGrad(unittest.TestCase):
     assert isinstance(y_tiny.grad, TinyTensor)
     self.assertTrue(x.grad.shape == x_tiny.grad.shape)
     self.assertTrue(y.grad.shape == y_tiny.grad.shape)
-    self.assertTrue(np.allclose(x.grad.data, x_tiny.grad.numpy()))
-    self.assertTrue(np.allclose(y.grad.data, y_tiny.grad.numpy()))
+    self.assertTrue(np.allclose(x.grad.numpy(), x_tiny.grad.numpy()))
+    self.assertTrue(np.allclose(y.grad.numpy(), y_tiny.grad.numpy()))
 
   def test_binary(self):
     for func_name in ["add", "mul", "sub", "div"]:
@@ -72,6 +72,42 @@ class TestGrad(unittest.TestCase):
       ]:
         self._test_binary(func_name, shapes)
 
+  def _test_binary_matmul(self, shapes: tuple[tuple[int, ...], tuple[int, ...]]):
+    shape1, shape2 = shapes
+    x_np = np.random.randn(*shape1).astype(np.float32)
+    y_np = np.random.randn(*shape2).astype(np.float32)
+
+    x = Tensor(x_np, requires_grad=True)
+    y = Tensor(y_np, requires_grad=True)
+    out = x.matmul(y)
+    out = out.sum()
+    out.backward()
+
+    x_tiny = TinyTensor(x_np, requires_grad=True)
+    y_tiny = TinyTensor(y_np, requires_grad=True)
+    out_tiny = x_tiny.matmul(y_tiny)
+    out_tiny = out_tiny.sum()
+    out_tiny.backward()
+
+    assert isinstance(x.grad, Tensor)
+    assert isinstance(y.grad, Tensor)
+    assert isinstance(x_tiny.grad, TinyTensor)
+    assert isinstance(y_tiny.grad, TinyTensor)
+    self.assertTrue(x.grad.shape == x_tiny.grad.shape)
+    self.assertTrue(y.grad.shape == y_tiny.grad.shape)
+    self.assertTrue(np.allclose(x.grad.numpy(), x_tiny.grad.numpy()))
+    self.assertTrue(np.allclose(y.grad.numpy(), y_tiny.grad.numpy()))
+
+  def test_binary_matmul(self):
+    shapes = [
+      ((2, 3), (3, 4)),
+      ((3, 4), (4, 2)),
+      # ((2, 3, 4), (4, 5)),  # TODO: not supported yet
+      # ((1, 2, 3, 4), (4, 5)),
+    ]
+    for shape_pair in shapes:
+      self._test_binary_matmul(shape_pair)
+
   def _test_reduce(self, func_name: str, shape: tuple[int, ...], axis: Optional[int]):
     x_np = np.random.randn(*shape).astype(np.float32)
 
@@ -87,10 +123,11 @@ class TestGrad(unittest.TestCase):
 
     assert isinstance(x.grad, Tensor)
     assert isinstance(x_tiny.grad, TinyTensor)
-    self.assertTrue(np.allclose(x.grad.data, x_tiny.grad.numpy()))
+    self.assertTrue(x.grad.shape == x_tiny.grad.shape)
+    self.assertTrue(np.allclose(x.grad.numpy(), x_tiny.grad.numpy()))
 
   def test_reduce(self):
-    for func_name in ["max"]:  # sum mean
+    for func_name in ["max", "sum", "mean"]:
       for shape in [(3,), (3, 4), (3, 4, 5)]:
         self._test_reduce(func_name, shape, axis=None)
         for axis in range(len(shape)):
