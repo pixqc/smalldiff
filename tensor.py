@@ -162,43 +162,12 @@ class Function:
     return res
 
 
-class Add(Function):
-  def forward(self, x, y) -> Tensor:
-    return Tensor(x + y)
-
-  # np.sum is reduce, opposite of implicit broadcast of numpy's x+y
-  def backward(self, out_grad: Tensor):
-    for tensor in self.prev:
-      reduce_axis = tuple(range(out_grad.ndim - tensor.ndim))
-      tensor.grad = (
-        out_grad
-        if tensor.shape == out_grad.shape
-        else Tensor(np.sum(out_grad.data, axis=reduce_axis))
-      )
-
-
-class Mul(Function):
-  def forward(self, x, y) -> Tensor:
-    return Tensor(x * y)
+class Relu(Function):
+  def forward(self, x) -> Tensor:
+    return Tensor(np.maximum(x, 0))
 
   def backward(self, out_grad: Tensor):
-    for i, tensor in enumerate(self.prev):
-      other = self.prev[1 - i]
-      grad = out_grad.data * other.data
-      tensor.grad = Tensor(
-        grad
-        if tensor.shape == out_grad.shape
-        else np.sum(grad, axis=tuple(range(out_grad.ndim - tensor.ndim)))
-      )
-
-
-class Sum(Function):
-  def forward(self, x, axis=None, keepdim=False) -> Tensor:
-    return Tensor(np.sum(x, axis=axis, keepdims=keepdim))
-
-  def backward(self, out_grad: Tensor):
-    x = self.prev[0]
-    x.grad = Tensor(np.broadcast_to(out_grad.data, x.shape))
+    self.prev[0].grad = Tensor(out_grad.data * (self.prev[0].data > 0))
 
 
 class Recip(Function):
@@ -208,38 +177,6 @@ class Recip(Function):
 
   def backward(self, out_grad: Tensor):
     self.prev[0].grad = Tensor(-out_grad.data / (np.pow(self.x.data, 2)))
-
-
-class Mean(Function):
-  def forward(self, x, axis=None, keepdim=False) -> Tensor:
-    self.x = x
-    self.axis = axis
-    return Tensor(np.mean(x, axis=axis, keepdims=keepdim))
-
-  def backward(self, out_grad: Tensor):
-    x = self.x.data
-    self.prev[0].grad = Tensor(x / x.shape[self.axis] * out_grad.data)
-
-
-class Relu(Function):
-  def forward(self, x) -> Tensor:
-    return Tensor(np.maximum(x, 0))
-
-  def backward(self, out_grad: Tensor):
-    self.prev[0].grad = Tensor(out_grad.data * (self.prev[0].data > 0))
-
-
-class Max(Function):
-  def forward(self, x, axis=None, keepdim=False) -> Tensor:
-    self.x = x
-    self.axis = axis
-    return Tensor(np.max(x, axis=axis, keepdims=keepdim))
-
-  def backward(self, out_grad: Tensor):
-    max_idx = np.argmax(self.x.data, axis=self.axis)
-    res = np.zeros_like(self.x)
-    res[max_idx] = 1 * out_grad.data
-    self.prev[0].grad = Tensor(res)
 
 
 class Log(Function):
@@ -258,6 +195,72 @@ class Exp(Function):
 
   def backward(self, out_grad: Tensor):
     self.prev[0].grad = Tensor(out_grad.data * self.res.data)
+
+
+class Add(Function):
+  def forward(self, x, y) -> Tensor:
+    return Tensor(x + y)
+
+  # grad needs to be sum'd if forward was broadcasted
+  def backward(self, out_grad: Tensor):
+    for tensor in self.prev:
+      reduce_axis = tuple(range(out_grad.ndim - tensor.ndim))
+      tensor.grad = (
+        out_grad
+        if tensor.shape == out_grad.shape
+        else Tensor(np.sum(out_grad.data, axis=reduce_axis))
+      )
+
+
+class Mul(Function):
+  def forward(self, x, y) -> Tensor:
+    return Tensor(x * y)
+
+  # grad needs to be sum'd if forward was broadcasted
+  def backward(self, out_grad: Tensor):
+    for i, tensor in enumerate(self.prev):
+      other = self.prev[1 - i]
+      grad = out_grad.data * other.data
+      tensor.grad = Tensor(
+        grad
+        if tensor.shape == out_grad.shape
+        else np.sum(grad, axis=tuple(range(out_grad.ndim - tensor.ndim)))
+      )
+
+
+class Max(Function):
+  def forward(self, x, axis=None, keepdim=False) -> Tensor:
+    self.x = x
+    self.axis = axis
+    self.keepdim = keepdim
+    return Tensor(np.max(x, axis=axis, keepdims=keepdim))
+
+  def backward(self, out_grad: Tensor):
+    max_values = np.max(self.x.data, axis=self.axis, keepdims=True)
+    mask = np.equal(self.x.data, max_values)
+    if self.axis is not None:
+      out_grad.data = np.expand_dims(out_grad.data, axis=self.axis)
+    self.prev[0].grad = Tensor(mask * out_grad.data)
+
+
+class Sum(Function):
+  def forward(self, x, axis=None, keepdim=False) -> Tensor:
+    return Tensor(np.sum(x, axis=axis, keepdims=keepdim))
+
+  def backward(self, out_grad: Tensor):
+    x = self.prev[0]
+    x.grad = Tensor(np.broadcast_to(out_grad.data, x.shape))
+
+
+class Mean(Function):
+  def forward(self, x, axis=None, keepdim=False) -> Tensor:
+    self.x = x
+    self.axis = axis
+    return Tensor(np.mean(x, axis=axis, keepdims=keepdim))
+
+  def backward(self, out_grad: Tensor):
+    x = self.x.data
+    self.prev[0].grad = Tensor(x / x.shape[self.axis] * out_grad.data)
 
 
 class Dot(Function):

@@ -89,12 +89,12 @@ class TestGrad(unittest.TestCase):
     assert isinstance(x_tiny.grad, TinyTensor)
     self.assertTrue(np.allclose(x.grad.data, x_tiny.grad.numpy()))
 
-  # def test_reduce(self):
-  #   for func_name in ["max", "sum", "mean"]:
-  #     for shape in [(3,), (3, 4), (3, 4, 5)]:
-  #       self._test_reduce(func_name, shape, axis=None)
-  #       for axis in range(len(shape)):
-  #         self._test_reduce(func_name, shape, axis=axis)
+  def test_reduce(self):
+    for func_name in ["max"]:  # sum mean
+      for shape in [(3,), (3, 4), (3, 4, 5)]:
+        self._test_reduce(func_name, shape, axis=None)
+        for axis in range(len(shape)):
+          self._test_reduce(func_name, shape, axis=axis)
 
   # def test_mlp_mnist(self):
   #   x_np = np.random.randn(784).astype(np.float32)
