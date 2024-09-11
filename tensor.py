@@ -74,6 +74,8 @@ class Tensor:
   def mul(self, x): return Mul.apply(self, x)
   def sub(self, x): return self + (-x)
   def div(self, x): return self * x.recip()
+  def dot(self, x): return Dot.apply(self, x)
+  def matmul(self, x): return self.dot(x)
 
   # reduce
   def max(self, axis=None, keepdim=False): return Max.apply(self, axis=axis, keepdim=keepdim)
@@ -83,12 +85,12 @@ class Tensor:
 
   # ----- composite operations -----
 
-  # TODO: can be impl'd by composing mul, add, reshape: see Tinygrad Tensor.dot
-  def dot(self, x):
-    return Dot.apply(self, x)
-
-  def matmul(self, x):
-    return self.dot(x)
+  __add__ = add
+  __mul__ = mul
+  __sub__ = sub
+  __neg__ = neg
+  __pow__ = pow
+  __matmul__ = matmul
 
   def _softmax(self, axis):
     m = self - self.max(axis=axis, keepdim=True)
@@ -106,13 +108,6 @@ class Tensor:
   def sparse_categorical_crossentropy(self, y):
     y = np.eye(10)[y.data]  # one hot
     return self.softmax().log().mul(y).sum().neg().mean()
-
-  __add__ = add
-  __mul__ = mul
-  __sub__ = sub
-  __neg__ = neg
-  __pow__ = pow
-  __matmul__ = matmul
 
   # ----- backward -----
 
@@ -268,15 +263,12 @@ class Mean(Function):
     prev = self.prev[0]
     if self.axis is None:
       num_elements = np.prod(prev.shape)
-      prev.grad = Tensor(np.ones_like(prev) / num_elements * out_grad.data)
+      prev.grad = Tensor(np.ones_like(prev.data) / num_elements * out_grad.data)
     else:
-      divisor = x.shape[self.axis] if not self.keepdim else 1
-      for i in range(len(x.shape)):
-        if i != self.axis:
-          divisor *= x.shape[i]
+      divisor = prev.shape[self.axis] if not self.keepdim else 1
       if not self.keepdim:
         out_grad.data = np.expand_dims(out_grad.data, axis=self.axis)
-      x.grad = Tensor(np.ones_like(x) / divisor * out_grad.data)
+      prev.grad = Tensor(np.ones_like(prev.data) / divisor * out_grad.data)
 
 
 class Dot(Function):
