@@ -99,7 +99,7 @@ class TestGrad(unittest.TestCase):
     self.assertTrue(np.allclose(y.grad.numpy(), y_tiny.grad.numpy()))
 
   def test_binary_matmul(self):
-    shapes = [
+    for shape_pair in [
       ((2, 3), (3, 4)),
       ((3, 4), (4, 2)),
       # ((2, 3, 4), (4, 5)),  # TODO: not supported yet
