@@ -232,7 +232,6 @@ class Max(Function):
   def forward(self, x, axis=None, keepdim=False) -> Tensor:
     self.x = x
     self.axis = axis
-    self.keepdim = keepdim
     return Tensor(np.max(x, axis=axis, keepdims=keepdim))
 
   def backward(self, out_grad: Tensor):
@@ -245,22 +244,39 @@ class Max(Function):
 
 class Sum(Function):
   def forward(self, x, axis=None, keepdim=False) -> Tensor:
+    self.axis = axis
+    self.keepdim = keepdim
     return Tensor(np.sum(x, axis=axis, keepdims=keepdim))
 
   def backward(self, out_grad: Tensor):
-    x = self.prev[0]
-    x.grad = Tensor(np.broadcast_to(out_grad.data, x.shape))
+    prev = self.prev[0]
+    if self.axis is None:
+      prev.grad = Tensor(np.broadcast_to(out_grad.data, prev.shape))
+    else:
+      if not self.keepdim:
+        out_grad.data = np.expand_dims(out_grad.data, axis=self.axis)
+      prev.grad = Tensor(np.broadcast_to(out_grad.data, prev.shape))
 
 
 class Mean(Function):
   def forward(self, x, axis=None, keepdim=False) -> Tensor:
-    self.x = x
     self.axis = axis
+    self.keepdim = keepdim
     return Tensor(np.mean(x, axis=axis, keepdims=keepdim))
 
   def backward(self, out_grad: Tensor):
-    x = self.x.data
-    self.prev[0].grad = Tensor(x / x.shape[self.axis] * out_grad.data)
+    prev = self.prev[0]
+    if self.axis is None:
+      num_elements = np.prod(prev.shape)
+      prev.grad = Tensor(np.ones_like(prev) / num_elements * out_grad.data)
+    else:
+      divisor = x.shape[self.axis] if not self.keepdim else 1
+      for i in range(len(x.shape)):
+        if i != self.axis:
+          divisor *= x.shape[i]
+      if not self.keepdim:
+        out_grad.data = np.expand_dims(out_grad.data, axis=self.axis)
+      x.grad = Tensor(np.ones_like(x) / divisor * out_grad.data)
 
 
 class Dot(Function):
