@@ -84,14 +84,14 @@ class Tensor:
   def mean(self, axis=None, keepdim=False): return Mean.apply(self, axis=axis, keepdim=keepdim)
   # fmt: on
 
-  # ----- composite operations -----
-
   __add__ = add
   __mul__ = mul
   __sub__ = sub
   __neg__ = neg
   __pow__ = pow
-  __matmul__ = matmul
+  __matmul__ = dot
+
+  # ----- composite operations -----
 
   def _softmax(self, axis):
     m = self - self.max(axis=axis, keepdim=True)
@@ -104,7 +104,7 @@ class Tensor:
 
   def log_softmax(self, axis=-1):
     m, _, ss = self._softmax(axis)
-    return m - (ss).log()
+    return m - ss.log()
 
   def sparse_categorical_crossentropy(self, y):
     y = np.eye(y.shape[0])[y.data]  # one hot
@@ -132,8 +132,7 @@ class Tensor:
       prev._ctx.backward(prev.grad)
 
   def __repr__(self):
-    grad_repr = self.grad.data if self.grad else None
-    return f"<Tensor {self.data!r} with grad {grad_repr!r}>"
+    return f"<Tensor {self.data!r} grad_fn={self._ctx!r}>"
 
 
 class Function:
@@ -237,6 +236,7 @@ class Max(Function):
   def forward(self, x, axis=None, keepdim=False) -> Tensor:
     self.x = x
     self.axis = axis
+    self.keepdim = keepdim
     return Tensor(np.max(x, axis=axis, keepdims=keepdim))
 
   def backward(self, out_grad: Tensor):
