@@ -33,6 +33,10 @@ class Tensor:
     return self.data.shape
 
   @property
+  def ndim(self):
+    return self.data.ndim
+
+  @property
   def T(self):
     return Tensor(self.data.T)
 
@@ -162,13 +166,29 @@ class Add(Function):
   def forward(self, x, y) -> Tensor:
     return Tensor(x + y)
 
+  # np.sum is reduce, opposite of implicit broadcast of numpy's x+y
   def backward(self, out_grad: Tensor):
-    # np.sum is reduce, opposite of implicit broadcast of numpy's x+y
-    for tensor in (self.prev[0], self.prev[1]):
+    for tensor in self.prev:
+      reduce_axis = tuple(range(out_grad.ndim - tensor.ndim))
       tensor.grad = (
         out_grad
         if tensor.shape == out_grad.shape
-        else Tensor(np.sum(out_grad.data, axis=0))  # correct axis?
+        else Tensor(np.sum(out_grad.data, axis=reduce_axis))
+      )
+
+
+class Mul(Function):
+  def forward(self, x, y) -> Tensor:
+    return Tensor(x * y)
+
+  def backward(self, out_grad: Tensor):
+    for i, tensor in enumerate(self.prev):
+      other = self.prev[1 - i]
+      grad = out_grad.data * other.data
+      tensor.grad = Tensor(
+        grad
+        if tensor.shape == out_grad.shape
+        else np.sum(grad, axis=tuple(range(out_grad.ndim - tensor.ndim)))
       )
 
 
@@ -188,15 +208,6 @@ class Recip(Function):
 
   def backward(self, out_grad: Tensor):
     self.prev[0].grad = Tensor(-out_grad.data / (np.pow(self.x.data, 2)))
-
-
-class Mul(Function):
-  def forward(self, x, y) -> Tensor:
-    return Tensor(x * y)
-
-  def backward(self, out_grad: Tensor):
-    self.prev[0].grad = Tensor(out_grad.data * self.prev[1].data)
-    self.prev[1].grad = Tensor(out_grad.data * self.prev[0].data)
 
 
 class Mean(Function):
