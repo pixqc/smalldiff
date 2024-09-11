@@ -27,7 +27,7 @@ class TestGrad(unittest.TestCase):
     self.assertTrue(np.allclose(x.grad.numpy(), x_tiny.grad.numpy()))
 
   def test_unary(self):
-    for func_name in ["relu", "log", "exp", "neg", "reciprocal"]:
+    for func_name in ["relu", "tanh", "log", "exp", "neg", "reciprocal"]:
       for shape in [(3,), (3, 4), (2, 3, 4)]:
         self._test_unary(func_name, shape)
 

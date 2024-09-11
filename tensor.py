@@ -63,6 +63,7 @@ class Tensor:
   # ----- primitive operations -----
   # unary
   def relu(self): return Relu.apply(self)
+  def tanh(self): return Tanh.apply(self)
   def recip(self): return Recip.apply(self)
   def log(self): return Log.apply(self)
   def exp(self): return Exp.apply(self)
@@ -163,6 +164,15 @@ class Relu(Function):
 
   def backward(self, out_grad: Tensor):
     self.prev[0].grad = Tensor(out_grad.data * (self.prev[0].data > 0))
+
+
+class Tanh(Function):
+  def forward(self, x) -> Tensor:
+    self.res = Tensor(np.tanh(x))
+    return self.res
+
+  def backward(self, out_grad: Tensor):
+    self.prev[0].grad = Tensor(out_grad.data * (1 - self.res.data**2))
 
 
 class Recip(Function):
