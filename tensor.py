@@ -240,11 +240,12 @@ class Max(Function):
     return Tensor(np.max(x, axis=axis, keepdims=keepdim))
 
   def backward(self, out_grad: Tensor):
+    prev = self.prev[0]
     max_values = np.max(self.x.data, axis=self.axis, keepdims=True)
     mask = np.equal(self.x.data, max_values)
-    if self.axis is not None:
+    if self.axis is not None and not self.keepdim:
       out_grad.data = np.expand_dims(out_grad.data, axis=self.axis)
-    self.prev[0].grad = Tensor(mask * out_grad.data)
+    prev.grad = Tensor(mask * out_grad.data)
 
 
 class Sum(Function):
