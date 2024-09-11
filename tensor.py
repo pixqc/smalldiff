@@ -60,7 +60,9 @@ class Tensor:
     return self.data
 
   # fmt: off
+
   # ----- primitive operations -----
+
   # unary
   def relu(self): return Relu.apply(self)
   def tanh(self): return Tanh.apply(self)
@@ -81,7 +83,7 @@ class Tensor:
   # reduce
   def max(self, axis=None, keepdim=False): return Max.apply(self, axis=axis, keepdim=keepdim)
   def sum(self, axis=None, keepdim=False): return Sum.apply(self, axis=axis, keepdim=keepdim)
-  def mean(self, axis=None, keepdim=False): return Mean.apply(self, axis=axis, keepdim=keepdim)
+  # def prod(self, axis=None, keepdim=False): return Prod.apply(self, axis=axis, keepdim=keepdim)
   # fmt: on
 
   __add__ = add
@@ -90,8 +92,13 @@ class Tensor:
   __neg__ = neg
   __pow__ = pow
   __matmul__ = dot
+  __truediv__ = div
 
   # ----- composite operations -----
+
+  def mean(self, axis=None, keepdim=False):
+    divisor = np.prod(self.shape) if axis is None else self.shape[axis]
+    return self.sum(axis=axis, keepdim=keepdim) / Tensor(divisor)
 
   def _softmax(self, axis):
     m = self - self.max(axis=axis, keepdim=True)
@@ -262,24 +269,6 @@ class Sum(Function):
       if not self.keepdim:
         out_grad.data = np.expand_dims(out_grad.data, axis=self.axis)
       prev.grad = Tensor(np.broadcast_to(out_grad.data, prev.shape))
-
-
-class Mean(Function):
-  def forward(self, x, axis=None, keepdim=False) -> Tensor:
-    self.axis = axis
-    self.keepdim = keepdim
-    return Tensor(np.mean(x, axis=axis, keepdims=keepdim))
-
-  def backward(self, out_grad: Tensor):
-    prev = self.prev[0]
-    if self.axis is None:
-      num_elements = np.prod(prev.shape)
-      prev.grad = Tensor(np.ones_like(prev.data) / num_elements * out_grad.data)
-    else:
-      divisor = prev.shape[self.axis] if not self.keepdim else 1
-      if not self.keepdim:
-        out_grad.data = np.expand_dims(out_grad.data, axis=self.axis)
-      prev.grad = Tensor(np.ones_like(prev.data) / divisor * out_grad.data)
 
 
 class Dot(Function):
