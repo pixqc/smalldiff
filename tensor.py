@@ -126,7 +126,7 @@ class Tensor:
 
   def cross_entropy(self, y):
     y_oh = np.eye(self.shape[-1])[y.data]
-    return -self.log_softmax().mul(y_oh).sum().mean()
+    return -self.log_softmax(axis=1).mul(y_oh).sum(axis=1).mean()
 
   __add__ = add
   __mul__ = mul
