@@ -34,8 +34,8 @@ class Tensor:
     return self.data.dtype
 
   @staticmethod
-  def rand(*shape):
-    return Tensor(np.random.randn(*shape))
+  def rand(*shape, **kwargs):
+    return Tensor(np.random.randn(*shape), **kwargs)
 
   @staticmethod
   def ones_like(*shape) -> Tensor:
@@ -48,10 +48,9 @@ class Tensor:
   def numpy(self):
     return self.data
 
-  # fmt: off
-
   # ----- primitive operations -----
 
+  # fmt: off
   # unary: EXP2, LOG2, CAST, BITCAST, SIN, SQRT, RECIP
   def relu(self): return Relu.apply(self)
   def tanh(self): return Tanh.apply(self)
@@ -129,9 +128,8 @@ class Tensor:
 
 class Function:
   def __init__(self, *tensors: Tensor):
-    self.prev = tensors
-    # TODO: requires_grad impl still buggy btw
-    # self.requires_grad = any([t.requires_grad for t in tensors])
+    self.requires_grad = any([t.requires_grad for t in tensors])
+    self.prev = tensors if self.requires_grad else None
 
   def forward(self, *args, **kwargs):
     raise NotImplementedError(f"forward not implemented for {type(self)}")
@@ -145,7 +143,8 @@ class Function:
     tensors = [ensure_tensor(t) for t in x]
     fn: Function = cls(*tensors)
     res: Tensor = fn.forward(*[t.data for t in tensors], **kwargs)
-    res._ctx = fn
+    res.requires_grad = fn.requires_grad
+    res._ctx = fn if fn.requires_grad else None
     return res
 
 
@@ -204,20 +203,21 @@ class Exp(Function):
 
 
 class Add(Function):
-  def forward(self, x, y) -> Tensor:
+  def forward(self, x: Tensor, y: Tensor) -> Tensor:
     return Tensor(x + y)
 
   # grad needs to be sum'd if forward was broadcasted
   def backward(self, out_grad: Tensor):
-    for tensor in self.prev:
-      reduce_axis = tuple(range(out_grad.ndim - tensor.ndim))
-      grad = (
-        out_grad
-        if tensor.shape == out_grad.shape
-        else Tensor(np.sum(out_grad.data, axis=reduce_axis))
-      )
-      # accumulate grad if x+x
-      tensor.grad = grad if tensor.grad is None else tensor.grad + grad
+    if self.prev is None:
+      return
+    for t in self.prev:
+      axis = tuple(range(out_grad.ndim - t.ndim))
+      grad = out_grad if t.shape == out_grad.shape else out_grad.sum(axis=axis)
+      if t.requires_grad:
+        if t.grad is None:
+          t.grad = Tensor.zeros_like(*t.shape)
+        # accumulate grad if x+x
+        t.grad += grad
 
 
 class Mul(Function):
