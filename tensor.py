@@ -202,14 +202,10 @@ class Relu(Function):
     return Tensor(np.maximum(x, 0))
 
   def backward(self, out_grad: Tensor):
-    if self.prev is None:
+    if not self.prev or not self.prev[0].requires_grad:
       return
-    prev = self.prev[0]
-    if prev.requires_grad:
-      grad = out_grad * (self.x > 0)
-      if prev.grad is None:
-        prev.grad = Tensor.zeros_like(*prev.shape)
-      prev.grad += grad
+    grad = out_grad * (self.x > 0)
+    self.prev[0].grad = grad if self.prev[0].grad is None else self.prev[0].grad + grad
 
 
 class Tanh(Function):
@@ -218,14 +214,10 @@ class Tanh(Function):
     return self.res
 
   def backward(self, out_grad: Tensor):
-    if self.prev is None:
+    if not self.prev or not self.prev[0].requires_grad:
       return
-    prev = self.prev[0]
-    if prev.requires_grad:
-      grad = out_grad * (1 - self.res**2)  #  type: ignore
-      if prev.grad is None:
-        prev.grad = Tensor.zeros_like(*prev.shape)
-      prev.grad += grad
+    grad = out_grad * (1 - self.res**2)  #  type: ignore
+    self.prev[0].grad = grad if self.prev[0].grad is None else self.prev[0].grad + grad
 
 
 class Recip(Function):
@@ -234,14 +226,10 @@ class Recip(Function):
     return Tensor(1 / x)
 
   def backward(self, out_grad: Tensor):
-    if self.prev is None:
+    if not self.prev or not self.prev[0].requires_grad:
       return
-    prev = self.prev[0]
-    if prev.requires_grad:
-      grad = -out_grad / (self.x**2)
-      if prev.grad is None:
-        prev.grad = Tensor.zeros_like(*prev.shape)
-      prev.grad += grad
+    grad = -out_grad / (self.x**2)
+    self.prev[0].grad = grad if self.prev[0].grad is None else self.prev[0].grad + grad
 
 
 class Log(Function):
@@ -250,14 +238,10 @@ class Log(Function):
     return Tensor(np.log(x))
 
   def backward(self, out_grad: Tensor):
-    if self.prev is None:
+    if not self.prev or not self.prev[0].requires_grad:
       return
-    prev = self.prev[0]
-    if prev.requires_grad:
-      grad = out_grad / self.x
-      if prev.grad is None:
-        prev.grad = Tensor.zeros_like(*prev.shape)
-      prev.grad += grad
+    grad = out_grad / self.x
+    self.prev[0].grad = grad if self.prev[0].grad is None else self.prev[0].grad + grad
 
 
 class Exp(Function):
@@ -266,54 +250,55 @@ class Exp(Function):
     return self.res
 
   def backward(self, out_grad: Tensor):
-    if self.prev is None:
+    if not self.prev or not self.prev[0].requires_grad:
       return
-    prev = self.prev[0]
-    if prev.requires_grad:
-      grad = out_grad * self.res
-      if prev.grad is None:
-        prev.grad = Tensor.zeros_like(*prev.shape)
-      prev.grad += grad
+    grad = out_grad * self.res
+    self.prev[0].grad = grad if self.prev[0].grad is None else self.prev[0].grad + grad
 
 
 class Add(Function):
   def forward(self, x: Tensor, y: Tensor) -> Tensor:
     return Tensor(x + y)
 
-  # grad needs to be sum'd if forward was broadcasted
   def backward(self, out_grad: Tensor):
-    if self.prev is None:
-      return
+    if not self.prev:
+      return  # fmt: skip
     for t in self.prev:
-      axis = tuple(range(out_grad.ndim - t.ndim))
-      grad = out_grad if t.shape == out_grad.shape else out_grad.sum(axis=axis)
       if t.requires_grad:
-        if t.grad is None:
-          t.grad = Tensor.zeros_like(*t.shape)
-        # accumulate grad if x+x
-        t.grad += grad
+        axis = tuple(range(out_grad.ndim - t.ndim))
+        grad = out_grad if t.shape == out_grad.shape else out_grad.sum(axis=axis)
+        t.grad = grad if t.grad is None else t.grad + grad
 
 
 class Mul(Function):
   def forward(self, x, y) -> Tensor:
     return Tensor(x * y)
 
-  # grad needs to be sum'd if forward was broadcasted
   def backward(self, out_grad: Tensor):
-    if self.prev is None:
+    if not self.prev:
       return
     for i, t in enumerate(self.prev):
-      other = self.prev[1 - i]
-      grad = out_grad * other
-      axis = tuple(range(out_grad.ndim - t.ndim))
-      grad = grad if t.shape == out_grad.shape else grad.sum(axis=axis)
       if t.requires_grad:
-        if t.grad is None:
-          t.grad = Tensor.zeros_like(*t.shape)
-        # accumulate grad if x*x
-        t.grad += grad
+        other = self.prev[1 - i]
+        grad = out_grad * other
+        axis = tuple(range(out_grad.ndim - t.ndim))
+        grad = grad if t.shape == out_grad.shape else grad.sum(axis=axis)
+        t.grad = grad if t.grad is None else t.grad + grad
 
 
+class Dot(Function):
+  def forward(self, x, y) -> Tensor:
+    return Tensor(x @ y)
+
+  def backward(self, out_grad: Tensor):
+    if not self.prev:
+      return
+    x, y = self.prev
+    x.grad = out_grad @ y.T if x.grad is None else x.grad + out_grad @ y.T
+    y.grad = x.T @ out_grad if y.grad is None else y.grad + x.T @ out_grad
+
+
+# should np be removed from max and sum here?
 class Max(Function):
   def forward(self, x, axis=None, keepdims=False) -> Tensor:
     self.x = x
@@ -322,6 +307,8 @@ class Max(Function):
     return Tensor(np.max(x, axis=axis, keepdims=keepdims))
 
   def backward(self, out_grad: Tensor):
+    if self.prev is None:
+      return
     prev = self.prev[0]
     max_values = np.max(self.x.data, axis=self.axis, keepdims=True)
     mask = np.equal(self.x.data, max_values)
@@ -338,6 +325,8 @@ class Sum(Function):
     return Tensor(np.sum(x, axis=axis, keepdims=keepdims))
 
   def backward(self, out_grad: Tensor):
+    if self.prev is None:
+      return
     prev = self.prev[0]
     if self.axis is None:
       prev.grad = Tensor(np.broadcast_to(out_grad.data, prev.shape))
@@ -346,13 +335,3 @@ class Sum(Function):
         out_grad.data = np.expand_dims(out_grad.data, axis=self.axis)
       grad = Tensor(np.broadcast_to(out_grad.data, prev.shape))
       prev.grad = grad if prev.grad is None else prev.grad + grad
-
-
-class Dot(Function):
-  def forward(self, x, y) -> Tensor:
-    return Tensor(x @ y)
-
-  def backward(self, out_grad: Tensor):
-    x, y = self.prev
-    x.grad = Tensor(out_grad.data @ y.data.T)
-    y.grad = Tensor(x.T.data @ out_grad.data)
