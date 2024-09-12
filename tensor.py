@@ -1,19 +1,8 @@
 from __future__ import annotations
 
-from enum import Enum
 from typing import List, Optional, Union
 
 import numpy as np
-
-# not used (for now), just for reference
-UnaryOps = Enum("UnaryOps", ["EXP2", "LOG2", "CAST", "BITCAST", "SIN", "SQRT", "RECIP"])
-BinaryOps = Enum("BinaryOps", ["ADD", "MUL", "IDIV", "MAX", "MOD", "CMPLT", "CMPNE", "XOR"])  # fmt: skip
-ReduceOps = Enum("ReduceOps", ["SUM", "PROD", "MAX"])
-TernaryOps = Enum("TernaryOps", ["WHERE", "MULACC"])
-MetaOps = Enum("MetaOps", ["EMPTY", "CONST", "COPY", "CONTIGUOUS", "CUSTOM", "ASSIGN", "VIEW"])  # fmt: skip
-# MovementOps doesn't actually exist in tinygrad
-MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "SHRINK", "STRIDE", "EXPAND", "PAD"])  # fmt: skip
-Op = Union[UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps]
 
 
 class Tensor:
@@ -63,7 +52,7 @@ class Tensor:
 
   # ----- primitive operations -----
 
-  # unary
+  # unary: EXP2, LOG2, CAST, BITCAST, SIN, SQRT, RECIP
   def relu(self): return Relu.apply(self)
   def tanh(self): return Tanh.apply(self)
   def recip(self): return Recip.apply(self)
@@ -72,7 +61,7 @@ class Tensor:
   def neg(self): return self * (-1)
   def reciprocal(self): return self.recip()  # tinygrad compat
 
-  # binary
+  # binary: ADD, MUL, IDIV, MAX, MOD, CMPLT, CMPNE, XOR
   def add(self, x): return Add.apply(self, x)
   def mul(self, x): return Mul.apply(self, x)
   def sub(self, x): return self + (-x)
@@ -80,10 +69,10 @@ class Tensor:
   def dot(self, x): return Dot.apply(self, x)
   def matmul(self, x): return self.dot(x)
 
-  # reduce
-  def max(self, axis=None, keepdim=False): return Max.apply(self, axis=axis, keepdim=keepdim)
-  def sum(self, axis=None, keepdim=False): return Sum.apply(self, axis=axis, keepdim=keepdim)
-  # def prod(self, axis=None, keepdim=False): return Prod.apply(self, axis=axis, keepdim=keepdim)
+  # reduce: SUM, PROD, MAX
+  def max(self, axis=None, keepdims=False): return Max.apply(self, axis=axis, keepdims=keepdims)
+  def sum(self, axis=None, keepdims=False): return Sum.apply(self, axis=axis, keepdims=keepdims)
+  # def prod(self, axis=None, keepdims=False): return Prod.apply(self, axis=axis, keepdim=keepdim)
   # fmt: on
 
   __add__ = add
@@ -96,19 +85,22 @@ class Tensor:
 
   # ----- composite operations -----
 
-  def mean(self, axis=None, keepdim=False):
+  def mean(self, axis=None, keepdims=False):
     divisor = np.prod(self.shape) if axis is None else self.shape[axis]
-    return self.sum(axis=axis, keepdim=keepdim) / Tensor(divisor)
+    return self.sum(axis=axis, keepdims=keepdims) / Tensor(divisor)
 
-  def softmax(self, axis=None):
-    return (self - self.max(axis=axis)).exp() / (self - self.max(axis=axis)).exp().sum()
+  def softmax(self, axis=-1):
+    keepdims = True if axis is None else False
+    return (self - self.max(axis=axis, keepdims=keepdims)).exp() / (
+      self - self.max(axis=axis, keepdims=keepdims)
+    ).exp().sum(axis=axis, keepdims=keepdims)
 
-  def log_softmax(self, axis=None):
+  def log_softmax(self, axis=-1):
     return self.softmax(axis=axis).log()
 
-  # def sparse_categorical_crossentropy(self, y):
-  #   y = np.eye(y.shape[0])[y.data]  # one hot
-  #   return -self.log_softmax().mul(y).mean().mul(Tensor(y.shape[0]))  # hack?
+  def cross_entropy(self, y):
+    y_oh = np.eye(self.shape[-1])[y.data]
+    return -self.log_softmax().mul(y_oh).sum().mean()
 
   # ----- backward -----
 
@@ -247,34 +239,34 @@ class Mul(Function):
 
 
 class Max(Function):
-  def forward(self, x, axis=None, keepdim=False) -> Tensor:
+  def forward(self, x, axis=None, keepdims=False) -> Tensor:
     self.x = x
     self.axis = axis
-    self.keepdim = keepdim
-    return Tensor(np.max(x, axis=axis, keepdims=keepdim))
+    self.keepdims = keepdims
+    return Tensor(np.max(x, axis=axis, keepdims=keepdims))
 
   def backward(self, out_grad: Tensor):
     prev = self.prev[0]
     max_values = np.max(self.x.data, axis=self.axis, keepdims=True)
     mask = np.equal(self.x.data, max_values)
-    if self.axis is not None and not self.keepdim:
+    if self.axis is not None and not self.keepdims:
       out_grad.data = np.expand_dims(out_grad.data, axis=self.axis)
     grad = Tensor(mask * out_grad.data)
     prev.grad = grad if prev.grad is None else prev.grad + grad
 
 
 class Sum(Function):
-  def forward(self, x, axis=None, keepdim=False) -> Tensor:
+  def forward(self, x, axis=None, keepdims=False) -> Tensor:
     self.axis = axis
-    self.keepdim = keepdim
-    return Tensor(np.sum(x, axis=axis, keepdims=keepdim))
+    self.keepdims = keepdims
+    return Tensor(np.sum(x, axis=axis, keepdims=keepdims))
 
   def backward(self, out_grad: Tensor):
     prev = self.prev[0]
     if self.axis is None:
       prev.grad = Tensor(np.broadcast_to(out_grad.data, prev.shape))
     else:
-      if not self.keepdim:
+      if not self.keepdims:
         out_grad.data = np.expand_dims(out_grad.data, axis=self.axis)
       grad = Tensor(np.broadcast_to(out_grad.data, prev.shape))
       prev.grad = grad if prev.grad is None else prev.grad + grad
