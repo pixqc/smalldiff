@@ -100,22 +100,15 @@ class Tensor:
     divisor = np.prod(self.shape) if axis is None else self.shape[axis]
     return self.sum(axis=axis, keepdim=keepdim) / Tensor(divisor)
 
-  def _softmax(self, axis):
-    m = self - self.max(axis=axis, keepdim=True)
-    e = m.exp()
-    return m, e, e.sum(axis=axis, keepdim=True)
+  def softmax(self, axis=None):
+    return (self - self.max(axis=axis)).exp() / (self - self.max(axis=axis)).exp().sum()
 
-  def softmax(self, axis=-1):
-    _, e, ss = self._softmax(axis)
-    return e.div(ss)
+  def log_softmax(self, axis=None):
+    return self.softmax(axis=axis).log()
 
-  def log_softmax(self, axis=-1):
-    m, _, ss = self._softmax(axis)
-    return m - ss.log()
-
-  def sparse_categorical_crossentropy(self, y):
-    y = np.eye(y.shape[0])[y.data]  # one hot
-    return -self.log_softmax().mul(y).mean().mul(Tensor(y.shape[0]))  # hack?
+  # def sparse_categorical_crossentropy(self, y):
+  #   y = np.eye(y.shape[0])[y.data]  # one hot
+  #   return -self.log_softmax().mul(y).mean().mul(Tensor(y.shape[0]))  # hack?
 
   # ----- backward -----
 

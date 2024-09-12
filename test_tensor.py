@@ -136,7 +136,22 @@ class TestGrad(unittest.TestCase):
         for axis in range(len(shape)):
           self._test_reduce(func_name, shape, axis=axis)
 
-  def test_composite_00(self):
+  def test_composite_00(self):  # softmax
+    x_np = np.array([0.7, 0.2, 0.1]).astype(np.float32)
+    x = Tensor(x_np, requires_grad=True)
+    out = x.softmax()
+    out.sum().backward()
+
+    x_tiny = TinyTensor(x_np, requires_grad=True)
+    out_tiny = x_tiny.softmax()
+    out_tiny.sum().backward()
+
+    self.assertTrue(np.allclose(out.numpy(), out_tiny.numpy()))
+    assert isinstance(x.grad, Tensor)
+    assert isinstance(x_tiny.grad, TinyTensor)
+    self.assertTrue(np.allclose(x.grad.numpy(), x_tiny.grad.numpy()))
+
+  def test_composite_01(self):
     x_np = np.random.randn(2, 4).astype(np.float32)
     w_np = np.random.randn(4, 5).astype(np.float32)
     b_np = np.random.randn(5).astype(np.float32)
@@ -144,13 +159,13 @@ class TestGrad(unittest.TestCase):
     x = Tensor(x_np, requires_grad=True)
     w = Tensor(w_np, requires_grad=True)
     b = Tensor(b_np, requires_grad=True)
-    out = x.matmul(w).add(b).tanh().sum()
+    out = x.matmul(w).add(b).tanh().softmax().sum()
     out.backward()
 
     x_tiny = TinyTensor(x_np, requires_grad=True)
     w_tiny = TinyTensor(w_np, requires_grad=True)
     b_tiny = TinyTensor(b_np, requires_grad=True)
-    out_tiny = x_tiny.matmul(w_tiny).add(b_tiny).tanh().sum()
+    out_tiny = x_tiny.matmul(w_tiny).add(b_tiny).tanh().softmax().sum()
     out_tiny.backward()
 
     self.assertTrue(np.allclose(out.numpy(), out_tiny.numpy()))
