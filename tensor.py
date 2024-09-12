@@ -266,7 +266,8 @@ class Max(Function):
     mask = np.equal(self.x.data, max_values)
     if self.axis is not None and not self.keepdim:
       out_grad.data = np.expand_dims(out_grad.data, axis=self.axis)
-    prev.grad = Tensor(mask * out_grad.data)
+    grad = Tensor(mask * out_grad.data)
+    prev.grad = grad if prev.grad is None else prev.grad + grad
 
 
 class Sum(Function):
@@ -282,7 +283,8 @@ class Sum(Function):
     else:
       if not self.keepdim:
         out_grad.data = np.expand_dims(out_grad.data, axis=self.axis)
-      prev.grad = Tensor(np.broadcast_to(out_grad.data, prev.shape))
+      grad = Tensor(np.broadcast_to(out_grad.data, prev.shape))
+      prev.grad = grad if prev.grad is None else prev.grad + grad
 
 
 class Dot(Function):
