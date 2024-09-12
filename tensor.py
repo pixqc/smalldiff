@@ -216,11 +216,13 @@ class Add(Function):
   def backward(self, out_grad: Tensor):
     for tensor in self.prev:
       reduce_axis = tuple(range(out_grad.ndim - tensor.ndim))
-      tensor.grad = (
+      grad = (
         out_grad
         if tensor.shape == out_grad.shape
         else Tensor(np.sum(out_grad.data, axis=reduce_axis))
       )
+      # accumulate grad if x+x
+      tensor.grad = grad if tensor.grad is None else tensor.grad + grad
 
 
 class Mul(Function):
@@ -232,11 +234,13 @@ class Mul(Function):
     for i, tensor in enumerate(self.prev):
       other = self.prev[1 - i]
       grad = out_grad.data * other.data
-      tensor.grad = Tensor(
+      grad = Tensor(
         grad
         if tensor.shape == out_grad.shape
         else np.sum(grad, axis=tuple(range(out_grad.ndim - tensor.ndim)))
       )
+      # accumulate grad if x*x
+      tensor.grad = grad if tensor.grad is None else tensor.grad + grad
 
 
 class Max(Function):
