@@ -48,45 +48,73 @@ class Tensor:
   def numpy(self):
     return self.data
 
-  # ----- primitive operations -----
+  def relu(self):
+    return Relu.apply(self)
+
+  def tanh(self):
+    return Tanh.apply(self)
+
+  def recip(self):
+    return Recip.apply(self)
+
+  def log(self):
+    return Log.apply(self)
+
+  def exp(self):
+    return Exp.apply(self)
+
+  def neg(self):
+    return self * (-1)
+
+  def reciprocal(self):
+    return self.recip()  # tinygrad compat
+
+  def add(self, x, reverse=False):
+    if reverse:
+      self, x = x, self
+    return Add.apply(self, x)
+
+  def mul(self, x, reverse=False):
+    if reverse:
+      self, x = x, self
+    return Mul.apply(self, x)
+
+  def sub(self, x, reverse=False):
+    if reverse:
+      self, x = x, self
+    return self + (-x)
+
+  def div(self, x, reverse=False):
+    x = Tensor(x) if not isinstance(x, Tensor) else x
+    if reverse:
+      self, x = x, self
+    return self * x.recip()
+
+  def dot(self, x):
+    return Dot.apply(self, x)
+
+  def matmul(self, x):
+    return self.dot(x)
 
   # fmt: off
-  # unary: EXP2, LOG2, CAST, BITCAST, SIN, SQRT, RECIP
-  def relu(self): return Relu.apply(self)
-  def tanh(self): return Tanh.apply(self)
-  def recip(self): return Recip.apply(self)
-  def log(self): return Log.apply(self)
-  def exp(self): return Exp.apply(self)
-  def neg(self): return self * (-1)
-  def reciprocal(self): return self.recip()  # tinygrad compat
-
-  # binary: ADD, MUL, IDIV, MAX, MOD, CMPLT, CMPNE, XOR
-  def add(self, x): return Add.apply(self, x)
-  def mul(self, x): return Mul.apply(self, x)
-  def sub(self, x): return self + (-x)
-  def div(self, x): return self * x.recip()
-  def dot(self, x): return Dot.apply(self, x)
-  def matmul(self, x): return self.dot(x)
-
-  # reduce: SUM, PROD, MAX
-  def max(self, axis=None, keepdims=False): return Max.apply(self, axis=axis, keepdims=keepdims)
-  def sum(self, axis=None, keepdims=False): return Sum.apply(self, axis=axis, keepdims=keepdims)
-  # def prod(self, axis=None, keepdims=False): return Prod.apply(self, axis=axis, keepdim=keepdim)
+  def pow(self, x):
+    if x == -1: return self.recip()
+    elif x == 0: return 1 + self * 0
+    elif x == 1: return self
+    elif x == 2: return self * self
+    elif x == 3: return self * self * self
+    else: NotImplementedError(f"pow({self}, {x}) not implemented")  # lol
   # fmt: on
 
-  __add__ = add
-  __mul__ = mul
-  __sub__ = sub
-  __neg__ = neg
-  __pow__ = pow
-  __matmul__ = dot
-  __truediv__ = div
+  def max(self, axis=None, keepdims=False):
+    return Max.apply(self, axis=axis, keepdims=keepdims)
 
-  # ----- composite operations -----
+  def sum(self, axis=None, keepdims=False):
+    return Sum.apply(self, axis=axis, keepdims=keepdims)
 
   def mean(self, axis=None, keepdims=False):
     divisor = np.prod(self.shape) if axis is None else self.shape[axis]
-    return self.sum(axis=axis, keepdims=keepdims) / Tensor(divisor)
+    return self.sum(axis=axis, keepdims=keepdims) / divisor
 
   def softmax(self, axis=-1):
     keepdims = True if axis is None else False
@@ -100,6 +128,26 @@ class Tensor:
   def cross_entropy(self, y):
     y_oh = np.eye(self.shape[-1])[y.data]
     return -self.log_softmax().mul(y_oh).sum().mean()
+
+  __add__ = add
+  __mul__ = mul
+  __sub__ = sub
+  __neg__ = neg
+  __pow__ = pow
+  __matmul__ = dot
+  __truediv__ = div
+
+  def __radd__(self, x):
+    return self.add(x, reverse=True)
+
+  def __rmul__(self, x):
+    return self.mul(x, reverse=True)
+
+  def __rsub__(self, x):
+    return self.sub(x, reverse=True)
+
+  def __rdiv__(self, x):
+    return self.div(x, reverse=True)
 
   # ----- backward -----
 
@@ -150,12 +198,18 @@ class Function:
 
 class Relu(Function):
   def forward(self, x) -> Tensor:
+    self.x = x
     return Tensor(np.maximum(x, 0))
 
   def backward(self, out_grad: Tensor):
+    if self.prev is None:
+      return
     prev = self.prev[0]
-    grad = Tensor(out_grad.data * (prev.data > 0))
-    prev.grad = grad if prev.grad is None else prev.grad + grad
+    if prev.requires_grad:
+      grad = out_grad * (self.x > 0)
+      if prev.grad is None:
+        prev.grad = Tensor.zeros_like(*prev.shape)
+      prev.grad += grad
 
 
 class Tanh(Function):
@@ -164,9 +218,14 @@ class Tanh(Function):
     return self.res
 
   def backward(self, out_grad: Tensor):
+    if self.prev is None:
+      return
     prev = self.prev[0]
-    grad = Tensor(out_grad.data * (1 - self.res.data**2))
-    prev.grad = grad if prev.grad is None else prev.grad + grad
+    if prev.requires_grad:
+      grad = out_grad * (1 - self.res**2)  #  type: ignore
+      if prev.grad is None:
+        prev.grad = Tensor.zeros_like(*prev.shape)
+      prev.grad += grad
 
 
 class Recip(Function):
@@ -175,9 +234,14 @@ class Recip(Function):
     return Tensor(1 / x)
 
   def backward(self, out_grad: Tensor):
+    if self.prev is None:
+      return
     prev = self.prev[0]
-    grad = Tensor(-out_grad.data / (np.pow(self.x.data, 2)))
-    prev.grad = grad if prev.grad is None else prev.grad + grad
+    if prev.requires_grad:
+      grad = -out_grad / (self.x**2)
+      if prev.grad is None:
+        prev.grad = Tensor.zeros_like(*prev.shape)
+      prev.grad += grad
 
 
 class Log(Function):
@@ -186,9 +250,14 @@ class Log(Function):
     return Tensor(np.log(x))
 
   def backward(self, out_grad: Tensor):
+    if self.prev is None:
+      return
     prev = self.prev[0]
-    grad = Tensor(out_grad.data / self.x.data)
-    prev.grad = grad if prev.grad is None else prev.grad + grad
+    if prev.requires_grad:
+      grad = out_grad / self.x
+      if prev.grad is None:
+        prev.grad = Tensor.zeros_like(*prev.shape)
+      prev.grad += grad
 
 
 class Exp(Function):
@@ -197,9 +266,14 @@ class Exp(Function):
     return self.res
 
   def backward(self, out_grad: Tensor):
+    if self.prev is None:
+      return
     prev = self.prev[0]
-    grad = Tensor(out_grad.data * self.res.data)
-    prev.grad = grad if prev.grad is None else prev.grad + grad
+    if prev.requires_grad:
+      grad = out_grad * self.res
+      if prev.grad is None:
+        prev.grad = Tensor.zeros_like(*prev.shape)
+      prev.grad += grad
 
 
 class Add(Function):
@@ -226,16 +300,18 @@ class Mul(Function):
 
   # grad needs to be sum'd if forward was broadcasted
   def backward(self, out_grad: Tensor):
-    for i, tensor in enumerate(self.prev):
+    if self.prev is None:
+      return
+    for i, t in enumerate(self.prev):
       other = self.prev[1 - i]
-      grad = out_grad.data * other.data
-      grad = Tensor(
-        grad
-        if tensor.shape == out_grad.shape
-        else np.sum(grad, axis=tuple(range(out_grad.ndim - tensor.ndim)))
-      )
-      # accumulate grad if x*x
-      tensor.grad = grad if tensor.grad is None else tensor.grad + grad
+      grad = out_grad * other
+      axis = tuple(range(out_grad.ndim - t.ndim))
+      grad = grad if t.shape == out_grad.shape else grad.sum(axis=axis)
+      if t.requires_grad:
+        if t.grad is None:
+          t.grad = Tensor.zeros_like(*t.shape)
+        # accumulate grad if x*x
+        t.grad += grad
 
 
 class Max(Function):
