@@ -169,7 +169,9 @@ class Relu(Function):
     return Tensor(np.maximum(x, 0))
 
   def backward(self, out_grad: Tensor):
-    self.prev[0].grad = Tensor(out_grad.data * (self.prev[0].data > 0))
+    prev = self.prev[0]
+    grad = Tensor(out_grad.data * (prev.data > 0))
+    prev.grad = grad if prev.grad is None else prev.grad + grad
 
 
 class Tanh(Function):
@@ -178,7 +180,9 @@ class Tanh(Function):
     return self.res
 
   def backward(self, out_grad: Tensor):
-    self.prev[0].grad = Tensor(out_grad.data * (1 - self.res.data**2))
+    prev = self.prev[0]
+    grad = Tensor(out_grad.data * (1 - self.res.data**2))
+    prev.grad = grad if prev.grad is None else prev.grad + grad
 
 
 class Recip(Function):
@@ -187,7 +191,9 @@ class Recip(Function):
     return Tensor(1 / x)
 
   def backward(self, out_grad: Tensor):
-    self.prev[0].grad = Tensor(-out_grad.data / (np.pow(self.x.data, 2)))
+    prev = self.prev[0]
+    grad = Tensor(-out_grad.data / (np.pow(self.x.data, 2)))
+    prev.grad = grad if prev.grad is None else prev.grad + grad
 
 
 class Log(Function):
@@ -196,7 +202,9 @@ class Log(Function):
     return Tensor(np.log(x))
 
   def backward(self, out_grad: Tensor):
-    self.prev[0].grad = Tensor(out_grad.data / self.x.data)
+    prev = self.prev[0]
+    grad = Tensor(out_grad.data / self.x.data)
+    prev.grad = grad if prev.grad is None else prev.grad + grad
 
 
 class Exp(Function):
@@ -205,7 +213,9 @@ class Exp(Function):
     return self.res
 
   def backward(self, out_grad: Tensor):
-    self.prev[0].grad = Tensor(out_grad.data * self.res.data)
+    prev = self.prev[0]
+    grad = Tensor(out_grad.data * self.res.data)
+    prev.grad = grad if prev.grad is None else prev.grad + grad
 
 
 class Add(Function):
