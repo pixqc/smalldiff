@@ -122,7 +122,7 @@ class Tensor:
     return (t - t.max(**kwargs)).exp() / (t - t.max(**kwargs)).exp().sum(**kwargs)
 
   def log_softmax(self, axis: Optional[int] = -1):
-    return self.softmax(axis=axis).log()
+    return self.softmax(axis=axis).add(1e-10).log()
 
   def cross_entropy(self, y):
     y_oh = np.eye(self.shape[-1])[y.data]
