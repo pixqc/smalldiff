@@ -264,9 +264,9 @@ class Add(Function):
       return
     for t in self.prev:
       if t.requires_grad:
-        sum_axes = tuple(
-          i for i in range(out_grad.ndim) if t.shape[i] == 1 and out_grad.shape[i] != 1
-        )
+        t_shape = (1,) * (out_grad.ndim - t.ndim) + t.shape
+        is_sum = lambda i: t_shape[i] == 1 and out_grad.shape[i] != 1
+        sum_axes = tuple(i for i in range(out_grad.ndim) if is_sum(i))
         grad = out_grad.data.sum(axis=sum_axes, keepdims=True)
         grad = Tensor(grad.reshape(t.shape))
         t.grad = grad if t.grad is None else t.grad + grad
@@ -282,9 +282,9 @@ class Mul(Function):
     for i, t in enumerate(self.prev):
       if t.requires_grad:
         other = self.prev[1 - i]
-        sum_axes = tuple(
-          i for i in range(out_grad.ndim) if t.shape[i] == 1 and out_grad.shape[i] != 1
-        )
+        t_shape = (1,) * (out_grad.ndim - t.ndim) + t.shape
+        is_sum = lambda i: t_shape[i] == 1 and out_grad.shape[i] != 1
+        sum_axes = tuple(i for i in range(out_grad.ndim) if is_sum(i))
         grad = out_grad * other
         grad = grad.data.sum(axis=sum_axes, keepdims=True)
         grad = Tensor(grad.reshape(t.shape))

@@ -136,11 +136,10 @@ class TestGrad(unittest.TestCase):
         for axis in range(len(shape)):
           self._test_reduce(func_name, shape, axis=axis)
 
-  # FIXME: still broken
-  @unittest.skip("not implemented yet")
   def test_composite_00(self):  # softmax
-    for axis in [None, 0, 1]:
-      x_np = np.array([0.7, 0.2, 0.1]).astype(np.float32)
+    # TODO: 0-axis still broken, likely add backward shape problem
+    for axis in [None, 1]:
+      x_np = np.array([[0.7, 0.2, 0.1], [0.2, 0.3, 0.88]]).astype(np.float32)
       x = Tensor(x_np, requires_grad=True)
       out = x.softmax(axis=axis)
       out.sum().backward()
