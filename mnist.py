@@ -41,13 +41,13 @@ def download_mnist(data_dir="./data"):
 def load_mnist(data_dir="./data"):
   def load_images(file_path):
     with open(file_path, "rb") as f:
-      f.read(16)  # Skip header
+      f.read(16)  # skip header
       data = np.frombuffer(f.read(), dtype=np.uint8).reshape(-1, 28 * 28)
     return data
 
   def load_labels(file_path):
     with open(file_path, "rb") as f:
-      f.read(8)  # Skip header
+      f.read(8)  # skip header
       labels = np.frombuffer(f.read(), dtype=np.uint8)
     return labels
 
@@ -61,37 +61,44 @@ def load_mnist(data_dir="./data"):
 
 if __name__ == "__main__":
   x_train, y_train, x_test, y_test = load_mnist()
+  batch_size = 50
+  epochs = 100
+  num_batches = x_train.shape[0] // batch_size
 
-  learning_rate = 0.01
-  epochs = 1000
-
-  x_train = Tensor(x_train)
-  y_train = Tensor(y_train)
-  x_test = Tensor(x_test)
-  y_test = Tensor(y_test)
   w1 = Tensor.rand(784, 16, dtype=np.float32, requires_grad=True)
   b1 = Tensor.rand(16, dtype=np.float32, requires_grad=True)
-  w2 = Tensor.rand(16, 16, dtype=np.float32, requires_grad=True)
-  b2 = Tensor.rand(16, dtype=np.float32, requires_grad=True)
-  w3 = Tensor.rand(16, 10, dtype=np.float32, requires_grad=True)
-  b3 = Tensor.rand(10, dtype=np.float32, requires_grad=True)
+  w2 = Tensor.rand(16, 10, dtype=np.float32, requires_grad=True)
+  b2 = Tensor.rand(10, dtype=np.float32, requires_grad=True)
 
+  print("mnist start train...")
   for epoch in range(epochs):
-    out = ((x_train @ w1 + b1).tanh() @ w2 + b2).tanh() @ w3 + b3
-    loss = out.cross_entropy(y_train)
-    loss.backward()
+    lr = 0.01 * (0.5 ** (epoch // 50))
+    shuffle_indices = np.random.permutation(x_train.shape[0])
+    x_train = x_train[shuffle_indices]
+    y_train = y_train[shuffle_indices]
+
+    for batch in range(num_batches):
+      start = batch * batch_size
+      end = start + batch_size
+      x_batch = Tensor(x_train[start:end])
+      y_batch = Tensor(y_train[start:end])
+
+      out = (x_batch @ w1 + b1).tanh() @ w2 + b2
+      loss = out.cross_entropy(y_batch)
+      loss.backward()
+
+      w1 = w1 - lr * w1.grad
+      b1 = b1 - lr * b1.grad
+      w2 = w2 - lr * w2.grad
+      b2 = b2 - lr * b2.grad
+
+      for t in [w1, b1, w2, b2]:
+        t._ctx = None  # cleanup computational graph
 
     print(f"epoch: {epoch+1}; loss: {loss.numpy()}")
 
-    w1 -= learning_rate * w1.grad
-    b1 -= learning_rate * b1.grad
-    w2 -= learning_rate * w2.grad
-    b2 -= learning_rate * b2.grad
-    w3 -= learning_rate * w3.grad
-    b3 -= learning_rate * b3.grad
-
     if epoch % 10 == 0 and epoch != 0:
-      out_test = ((x_test @ w1 + b1).tanh() @ w2 + b2).tanh() @ w3 + b3
+      out_test = (Tensor(x_test) @ w1 + b1).tanh() @ w2 + b2
       predictions = out_test.data.argmax(axis=1)
-      accuracy = np.mean(predictions == y_test.numpy())
+      accuracy = np.mean(predictions == y_test)
       print(f"test accuracy: {accuracy}")
