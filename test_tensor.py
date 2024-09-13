@@ -222,25 +222,16 @@ class TestGrad(unittest.TestCase):
     out_t = out_t.cross_entropy(y_t)
     out_t.backward()
 
-    assert isinstance(w1.grad, Tensor)
-    assert isinstance(b1.grad, Tensor)
-    assert isinstance(w2.grad, Tensor)
-    assert isinstance(b2.grad, Tensor)
-    assert isinstance(w3.grad, Tensor)
-    assert isinstance(b3.grad, Tensor)
-    assert isinstance(w1_t.grad, TinyTensor)
-    assert isinstance(b1_t.grad, TinyTensor)
-    assert isinstance(w2_t.grad, TinyTensor)
-    assert isinstance(b2_t.grad, TinyTensor)
-    assert isinstance(w3_t.grad, TinyTensor)
-    assert isinstance(b3_t.grad, TinyTensor)
+    for t in [w1, b1, w2, b2, w3, b3]:
+      assert isinstance(t.grad, Tensor)
+
     self.assertTrue(np.allclose(out.numpy(), out_t.numpy(), **tol_kwargs))
-    self.assertTrue(np.allclose(w1.grad.numpy(), w1_t.grad.numpy(), atol=1e-3))
-    self.assertTrue(np.allclose(b1.grad.numpy(), b1_t.grad.numpy(), **tol_kwargs))
-    self.assertTrue(np.allclose(w2.grad.numpy(), w2_t.grad.numpy(), **tol_kwargs))
-    self.assertTrue(np.allclose(b2.grad.numpy(), b2_t.grad.numpy(), **tol_kwargs))
-    self.assertTrue(np.allclose(w3.grad.numpy(), w3_t.grad.numpy(), **tol_kwargs))
-    self.assertTrue(np.allclose(b3.grad.numpy(), b3_t.grad.numpy(), **tol_kwargs))
+    self.assertTrue(np.allclose(w1.grad.numpy(), w1_t.grad.numpy(), atol=1e-3))  # type: ignore
+    self.assertTrue(np.allclose(b1.grad.numpy(), b1_t.grad.numpy(), **tol_kwargs))  # type: ignore
+    self.assertTrue(np.allclose(w2.grad.numpy(), w2_t.grad.numpy(), **tol_kwargs))  # type: ignore
+    self.assertTrue(np.allclose(b2.grad.numpy(), b2_t.grad.numpy(), **tol_kwargs))  # type: ignore
+    self.assertTrue(np.allclose(w3.grad.numpy(), w3_t.grad.numpy(), **tol_kwargs))  # type: ignore
+    self.assertTrue(np.allclose(b3.grad.numpy(), b3_t.grad.numpy(), **tol_kwargs))  # type: ignore
 
 
 if __name__ == "__main__":
