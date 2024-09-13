@@ -261,11 +261,14 @@ class Add(Function):
 
   def backward(self, out_grad: Tensor):
     if not self.prev:
-      return  # fmt: skip
+      return
     for t in self.prev:
       if t.requires_grad:
-        axis = tuple(range(out_grad.ndim - t.ndim))
-        grad = out_grad if t.shape == out_grad.shape else out_grad.sum(axis=axis)
+        sum_axes = tuple(
+          i for i in range(out_grad.ndim) if t.shape[i] == 1 and out_grad.shape[i] != 1
+        )
+        grad = out_grad.data.sum(axis=sum_axes, keepdims=True)
+        grad = Tensor(grad.reshape(t.shape))
         t.grad = grad if t.grad is None else t.grad + grad
 
 
@@ -279,9 +282,12 @@ class Mul(Function):
     for i, t in enumerate(self.prev):
       if t.requires_grad:
         other = self.prev[1 - i]
+        sum_axes = tuple(
+          i for i in range(out_grad.ndim) if t.shape[i] == 1 and out_grad.shape[i] != 1
+        )
         grad = out_grad * other
-        axis = tuple(range(out_grad.ndim - t.ndim))
-        grad = grad if t.shape == out_grad.shape else grad.sum(axis=axis)
+        grad = grad.data.sum(axis=sum_axes, keepdims=True)
+        grad = Tensor(grad.reshape(t.shape))
         t.grad = grad if t.grad is None else t.grad + grad
 
 
