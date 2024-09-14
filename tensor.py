@@ -348,3 +348,18 @@ class Sum(Function):
         out_grad = np.expand_dims(out_grad, axis=self.axis)
       grad = np.broadcast_to(out_grad, prev.shape)
     prev.grad = grad if prev.grad is None else prev.grad + grad
+
+
+class SGD:
+  def __init__(self, parameters, lr=0.01):
+    self.parameters = parameters
+    self.lr = lr
+
+  def step(self):
+    for param in self.parameters:
+      param.data -= self.lr * param.grad
+
+  def zero_grad(self):
+    for param in self.parameters:
+      param.grad = None
+      param._ctx = None  # cleanup computational graph

@@ -4,7 +4,7 @@ import os
 import numpy as np
 import requests
 
-from tensor import Tensor
+from tensor import SGD, Tensor
 
 
 def download_mnist(data_dir="./data"):
@@ -62,17 +62,17 @@ def load_mnist(data_dir="./data"):
 if __name__ == "__main__":
   x_train, y_train, x_test, y_test = load_mnist()
   batch_size = 50
-  epochs = 100
+  epochs = 50
   num_batches = x_train.shape[0] // batch_size
 
-  w1 = Tensor.rand(784, 16, dtype=np.float32, requires_grad=True)
-  b1 = Tensor.rand(16, dtype=np.float32, requires_grad=True)
-  w2 = Tensor.rand(16, 10, dtype=np.float32, requires_grad=True)
+  w1 = Tensor.rand(784, 128, dtype=np.float32, requires_grad=True)
+  b1 = Tensor.rand(128, dtype=np.float32, requires_grad=True)
+  w2 = Tensor.rand(128, 10, dtype=np.float32, requires_grad=True)
   b2 = Tensor.rand(10, dtype=np.float32, requires_grad=True)
+  optimizer = SGD([w1, b1, w2, b2], lr=0.01)
 
   print("mnist start train...")
   for epoch in range(epochs):
-    lr = 0.01 * (0.5 ** (epoch // 50))
     shuffle_indices = np.random.permutation(x_train.shape[0])
     x_train = x_train[shuffle_indices]
     y_train = y_train[shuffle_indices]
@@ -86,18 +86,12 @@ if __name__ == "__main__":
       out = (x_batch @ w1 + b1).tanh() @ w2 + b2
       loss = out.cross_entropy(y_batch)
       loss.backward()
-
-      w1 = w1 - lr * w1.grad
-      b1 = b1 - lr * b1.grad
-      w2 = w2 - lr * w2.grad
-      b2 = b2 - lr * b2.grad
-
-      for t in [w1, b1, w2, b2]:
-        t._ctx = None  # cleanup computational graph
+      optimizer.step()
+      optimizer.zero_grad()
 
     print(f"epoch: {epoch+1}; loss: {loss.numpy()}")
 
-    if epoch % 10 == 0 and epoch != 0:
+    if epoch % 5 == 0 and epoch != 0:
       out_test = (Tensor(x_test) @ w1 + b1).tanh() @ w2 + b2
       predictions = out_test.data.argmax(axis=1)
       accuracy = np.mean(predictions == y_test)
