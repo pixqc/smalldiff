@@ -59,17 +59,29 @@ def load_mnist(data_dir="./data"):
   return x_train, y_train, x_test, y_test
 
 
+class Model:
+  def __init__(self):
+    kwargs = {"dtype": np.float32, "requires_grad": True}
+    self.w1 = Tensor.rand(784, 128, **kwargs)
+    self.b1 = Tensor.rand(128, **kwargs)
+    self.w2 = Tensor.rand(128, 10, **kwargs)
+    self.b2 = Tensor.rand(10, **kwargs)
+
+  def __call__(self, x):
+    return ((x @ self.w1 + self.b1).tanh()) @ self.w2 + self.b2
+
+  def params(self):
+    return [self.w1, self.b1, self.w2, self.b2]
+
+
 if __name__ == "__main__":
   x_train, y_train, x_test, y_test = load_mnist()
   batch_size = 50
   epochs = 50
   num_batches = x_train.shape[0] // batch_size
 
-  w1 = Tensor.rand(784, 128, dtype=np.float32, requires_grad=True)
-  b1 = Tensor.rand(128, dtype=np.float32, requires_grad=True)
-  w2 = Tensor.rand(128, 10, dtype=np.float32, requires_grad=True)
-  b2 = Tensor.rand(10, dtype=np.float32, requires_grad=True)
-  optimizer = SGD([w1, b1, w2, b2], lr=0.01)
+  model = Model()
+  optimizer = SGD(model.params(), lr=0.01)
 
   print("mnist start train...")
   for epoch in range(epochs):
@@ -83,7 +95,7 @@ if __name__ == "__main__":
       x_batch = Tensor(x_train[start:end])
       y_batch = Tensor(y_train[start:end])
 
-      out = (x_batch @ w1 + b1).tanh() @ w2 + b2
+      out = model(x_batch)
       loss = out.cross_entropy(y_batch)
       loss.backward()
       optimizer.step()
@@ -92,7 +104,7 @@ if __name__ == "__main__":
     print(f"epoch: {epoch+1}; loss: {loss.numpy()}")
 
     if epoch % 5 == 0 and epoch != 0:
-      out_test = (Tensor(x_test) @ w1 + b1).tanh() @ w2 + b2
+      out_test = model(Tensor(x_test))
       predictions = out_test.data.argmax(axis=1)
       accuracy = np.mean(predictions == y_test)
-      print(f"test accuracy: {accuracy}")
+      print(f"test accuracy: {accuracy:.2f}")
