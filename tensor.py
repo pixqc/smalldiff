@@ -12,8 +12,9 @@ class Tensor:
     dtype=None,
     requires_grad=False,
   ):
+    data = data.data if isinstance(data, Tensor) else data
     self.data = np.array(data, dtype=dtype)
-    self.grad: Optional[Tensor] = None
+    self.grad: Optional[np.ndarray] = None
     self._ctx: Optional[Function] = None
     self.requires_grad = requires_grad
 
@@ -164,7 +165,7 @@ class Tensor:
 
   def backward(self):
     assert self.data.ndim == 0, "only scalar can be backwarded"
-    self.grad = Tensor(1.0)
+    self.grad = np.array(1.0)
     for prev in reversed(self.deepwalk()):
       assert isinstance(prev._ctx, Function), f"ctx is None for {prev}"
       prev._ctx.backward(prev.grad)
@@ -196,70 +197,77 @@ class Function:
 
 
 class Relu(Function):
-  def forward(self, x) -> Tensor:
+  def forward(self, x: np.ndarray) -> Tensor:
     self.x = x
-    return Tensor(np.maximum(x, 0))
+    return Tensor(np.maximum(self.x, 0))
 
-  def backward(self, out_grad: Tensor):
+  def backward(self, out_grad: np.ndarray):
     if not self.prev or not self.prev[0].requires_grad:
       return
+    prev: Tensor = self.prev[0]
     grad = out_grad * (self.x > 0)
-    self.prev[0].grad = grad if self.prev[0].grad is None else self.prev[0].grad + grad
+    prev.grad = grad if prev.grad is None else prev.grad + grad
 
 
 class Tanh(Function):
-  def forward(self, x) -> Tensor:
-    self.res = Tensor(np.tanh(x))
-    return self.res
+  def forward(self, x: np.ndarray) -> Tensor:
+    self.x = x
+    self.res = np.tanh(self.x)
+    return Tensor(self.res)
 
-  def backward(self, out_grad: Tensor):
+  def backward(self, out_grad: np.ndarray):
     if not self.prev or not self.prev[0].requires_grad:
       return
-    grad = out_grad * (1 - self.res**2)  #  type: ignore
-    self.prev[0].grad = grad if self.prev[0].grad is None else self.prev[0].grad + grad
+    prev: Tensor = self.prev[0]
+    grad = out_grad * (1 - self.res**2)
+    prev.grad = grad if prev.grad is None else prev.grad + grad
 
 
 class Recip(Function):
-  def forward(self, x) -> Tensor:
+  def forward(self, x: np.ndarray) -> Tensor:
     self.x = x
-    return Tensor(1 / x)
+    return Tensor(1 / self.x)
 
-  def backward(self, out_grad: Tensor):
+  def backward(self, out_grad: np.ndarray):
     if not self.prev or not self.prev[0].requires_grad:
       return
+    prev: Tensor = self.prev[0]
     grad = -out_grad / (self.x**2)
-    self.prev[0].grad = grad if self.prev[0].grad is None else self.prev[0].grad + grad
+    prev.grad = grad if prev.grad is None else prev.grad + grad
 
 
 class Log(Function):
-  def forward(self, x) -> Tensor:
+  def forward(self, x: np.ndarray) -> Tensor:
     self.x = x
-    return Tensor(np.log(x))
+    return Tensor(np.log(self.x))
 
-  def backward(self, out_grad: Tensor):
+  def backward(self, out_grad: np.ndarray):
     if not self.prev or not self.prev[0].requires_grad:
       return
+    prev: Tensor = self.prev[0]
     grad = out_grad / self.x
-    self.prev[0].grad = grad if self.prev[0].grad is None else self.prev[0].grad + grad
+    prev.grad = grad if prev.grad is None else prev.grad + grad
 
 
 class Exp(Function):
-  def forward(self, x) -> Tensor:
-    self.res = Tensor(np.exp(x))
-    return self.res
+  def forward(self, x: np.ndarray) -> Tensor:
+    self.x = x
+    self.res = np.exp(self.x)
+    return Tensor(self.res)
 
-  def backward(self, out_grad: Tensor):
+  def backward(self, out_grad: np.ndarray):
     if not self.prev or not self.prev[0].requires_grad:
       return
+    prev: Tensor = self.prev[0]
     grad = out_grad * self.res
-    self.prev[0].grad = grad if self.prev[0].grad is None else self.prev[0].grad + grad
+    prev.grad = grad if prev.grad is None else prev.grad + grad
 
 
 class Add(Function):
-  def forward(self, x: Tensor, y: Tensor) -> Tensor:
+  def forward(self, x: np.ndarray, y: np.ndarray) -> Tensor:
     return Tensor(x + y)
 
-  def backward(self, out_grad: Tensor):
+  def backward(self, out_grad: np.ndarray):
     if not self.prev:
       return
     for t in self.prev:
@@ -267,76 +275,76 @@ class Add(Function):
         t_shape = (1,) * (out_grad.ndim - t.ndim) + t.shape
         is_sum = lambda i: t_shape[i] == 1 and out_grad.shape[i] != 1
         sum_axes = tuple(i for i in range(out_grad.ndim) if is_sum(i))
-        grad = out_grad.data.sum(axis=sum_axes, keepdims=True)
-        grad = Tensor(grad.reshape(t.shape))
+        grad = out_grad.sum(axis=sum_axes, keepdims=True)
+        grad = grad.reshape(t.shape)
         t.grad = grad if t.grad is None else t.grad + grad
 
 
 class Mul(Function):
-  def forward(self, x, y) -> Tensor:
+  def forward(self, x: np.ndarray, y: np.ndarray) -> Tensor:
     return Tensor(x * y)
 
-  def backward(self, out_grad: Tensor):
+  def backward(self, out_grad: np.ndarray):
     if not self.prev:
       return
     for i, t in enumerate(self.prev):
       if t.requires_grad:
-        other = self.prev[1 - i]
+        other = self.prev[1 - i].data
         t_shape = (1,) * (out_grad.ndim - t.ndim) + t.shape
         is_sum = lambda i: t_shape[i] == 1 and out_grad.shape[i] != 1
         sum_axes = tuple(i for i in range(out_grad.ndim) if is_sum(i))
         grad = out_grad * other
-        grad = grad.data.sum(axis=sum_axes, keepdims=True)
-        grad = Tensor(grad.reshape(t.shape))
+        grad = grad.sum(axis=sum_axes, keepdims=True)
+        grad = grad.reshape(t.shape)
         t.grad = grad if t.grad is None else t.grad + grad
 
 
 class Dot(Function):
-  def forward(self, x, y) -> Tensor:
+  def forward(self, x: np.ndarray, y: np.ndarray) -> Tensor:
     return Tensor(x @ y)
 
-  def backward(self, out_grad: Tensor):
+  def backward(self, out_grad: np.ndarray):
     if not self.prev:
       return
     x, y = self.prev
-    x.grad = out_grad @ y.T if x.grad is None else x.grad + out_grad @ y.T
-    y.grad = x.T @ out_grad if y.grad is None else y.grad + x.T @ out_grad
+    x.grad = out_grad @ y.data.T if x.grad is None else x.grad + out_grad @ y.data.T
+    y.grad = x.data.T @ out_grad if y.grad is None else y.grad + x.data.T @ out_grad
 
 
-# should np be removed from max and sum here?
 class Max(Function):
-  def forward(self, x, axis=None, keepdim=False) -> Tensor:
+  def forward(self, x: np.ndarray, axis=None, keepdim=False) -> Tensor:
     self.x = x
     self.axis = axis
     self.keepdim = keepdim
     return Tensor(np.max(x, axis=axis, keepdims=keepdim))
 
-  def backward(self, out_grad: Tensor):
+  def backward(self, out_grad: np.ndarray):
     if self.prev is None:
       return
-    prev = self.prev[0]
-    max_values = np.max(self.x.data, axis=self.axis, keepdims=True)
-    mask = np.equal(self.x.data, max_values)
+    prev: Tensor = self.prev[0]
+    max_values = np.max(self.x, axis=self.axis, keepdims=True)
+    mask = np.equal(self.x, max_values)
     if self.axis is not None and not self.keepdim:
-      out_grad.data = np.expand_dims(out_grad.data, axis=self.axis)
-    grad = Tensor(mask * out_grad.data)
+      out_grad = np.expand_dims(out_grad, axis=self.axis)
+    grad = mask * out_grad
     prev.grad = grad if prev.grad is None else prev.grad + grad
 
 
 class Sum(Function):
-  def forward(self, x, axis=None, keepdim=False) -> Tensor:
+  def forward(self, x: np.ndarray, axis=None, keepdim=False) -> Tensor:
+    self.x = x
     self.axis = axis
     self.keepdim = keepdim
-    return Tensor(np.sum(x, axis=axis, keepdims=keepdim))
+    return Tensor(np.sum(self.x, axis=axis, keepdims=keepdim))
 
-  def backward(self, out_grad: Tensor):
+  def backward(self, out_grad: np.ndarray):
     if self.prev is None:
       return
-    prev = self.prev[0]
+    prev: Tensor = self.prev[0]
     if self.axis is None:
-      prev.grad = Tensor(np.broadcast_to(out_grad.data, prev.shape))
+      grad = np.broadcast_to(out_grad, prev.shape)
     else:
       if not self.keepdim:
-        out_grad.data = np.expand_dims(out_grad.data, axis=self.axis)
-      grad = Tensor(np.broadcast_to(out_grad.data, prev.shape))
-      prev.grad = grad if prev.grad is None else prev.grad + grad
+        out_grad = np.expand_dims(out_grad, axis=self.axis)
+      grad = np.broadcast_to(out_grad, prev.shape)
+    prev.grad = grad if prev.grad is None else prev.grad + grad
