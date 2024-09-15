@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import functools
 from typing import List, Optional, Union
 
 import numpy as np
+
+
+def prod(xs):
+  return functools.reduce(lambda x, y: x * y, xs)
 
 
 class Tensor:
@@ -66,11 +71,20 @@ class Tensor:
   def exp(self):
     return Exp.apply(self)
 
+  def sqrt(self):
+    return Sqrt.apply(self)
+
   def neg(self):
     return self * (-1)
 
   def reciprocal(self):  # tinygrad compat
     return self.recip()
+
+  def square(self):
+    return self * self
+
+  def batchnorm(self, weight, bias, mean, invstd):
+    pass
 
   # -- binary ops --
 
@@ -98,6 +112,7 @@ class Tensor:
   def pow(self, x):
     if x == -1: return self.recip()
     elif x == 0: return 1 + self * 0
+    elif x == 0.5: return self.sqrt()
     elif x == 1: return self
     elif x == 2: return self * self
     elif x == 3: return self * self * self
@@ -116,10 +131,13 @@ class Tensor:
     divisor = np.prod(self.shape) if axis is None else self.shape[axis]
     return self.sum(axis=axis, keepdim=keepdim) / divisor
 
-  def var(self, axis=None, keepdim=False):
-    return (
-      self.mean(axis=axis, keepdim=keepdim) - self.mean(axis=axis, keepdim=keepdim) ** 2
-    )
+  def var(self, axis=None, keepdim=False, correction=1):
+    squares = (self - self.mean(axis=axis, keepdim=True)).square()
+    n = prod([si for si, so in zip(self.shape, squares.sum(axis=axis, keepdim=True).shape)if si != so])  # fmt: skip
+    return squares.sum(axis=axis, keepdim=keepdim).div(max(0, n - correction))
+
+  def std(self, axis=None, keepdim=False, correction=1):
+    return self.var(axis=axis, keepdim=keepdim, correction=correction).sqrt()
 
   def _softmax(self, axis):  # from tinygrad's Tensor.softmax
     m = self - self.max(axis=axis, keepdim=True)
@@ -214,8 +232,7 @@ class Relu(Function):
 
 class Tanh(Function):
   def forward(self, x: np.ndarray) -> Tensor:
-    self.x = x
-    self.res = np.tanh(self.x)
+    self.res = np.tanh(x)
     return Tensor(self.res)
 
   def backward(self, out_grad: np.ndarray):
@@ -254,8 +271,7 @@ class Log(Function):
 
 class Exp(Function):
   def forward(self, x: np.ndarray) -> Tensor:
-    self.x = x
-    self.res = np.exp(self.x)
+    self.res = np.exp(x)
     return Tensor(self.res)
 
   def backward(self, out_grad: np.ndarray):
@@ -263,6 +279,19 @@ class Exp(Function):
       return
     prev: Tensor = self.prev[0]
     grad = out_grad * self.res
+    prev.grad = grad if prev.grad is None else prev.grad + grad
+
+
+class Sqrt(Function):
+  def forward(self, x: np.ndarray) -> Tensor:
+    self.res = np.sqrt(x)
+    return Tensor(self.res)
+
+  def backward(self, out_grad: np.ndarray):
+    if not self.prev or not self.prev[0].requires_grad:
+      return
+    prev: Tensor = self.prev[0]
+    grad = out_grad / (2 * self.res)
     prev.grad = grad if prev.grad is None else prev.grad + grad
 
 

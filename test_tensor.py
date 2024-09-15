@@ -12,7 +12,7 @@ tol_kwargs = {"atol": 1e-5, "rtol": 1e-5, "equal_nan": False}
 class TestGrad(unittest.TestCase):
   def _test_unary(self, func_name: str, shape: tuple[int, ...]):
     x_np = np.random.randn(*shape).astype(np.float32)
-    x_np = np.clip(x_np, 1e-6, 1) if func_name == "log" else x_np
+    x_np = np.clip(x_np, 1e-6, 1) if func_name in ["log", "sqrt"] else x_np
 
     x = Tensor(x_np, requires_grad=True)
     out = getattr(x, func_name)()
@@ -29,7 +29,7 @@ class TestGrad(unittest.TestCase):
     self.assertTrue(np.allclose(x.grad, x_t.grad.numpy(), **tol_kwargs))  # type: ignore
 
   def test_unary(self):
-    for func_name in ["relu", "tanh", "log", "exp", "neg", "reciprocal"]:
+    for func_name in ["relu", "tanh", "log", "exp", "sqrt", "neg", "reciprocal"]:
       for shape in [(3,), (3, 4), (2, 3, 4)]:
         self._test_unary(func_name, shape)
 
@@ -121,15 +121,14 @@ class TestGrad(unittest.TestCase):
     self.assertTrue(np.allclose(x.grad, x_t.grad.numpy(), **tol_kwargs))  # type: ignore
 
   def test_reduce(self):
-    for func_name in ["max", "sum", "mean"]:  # TODO: prod
+    for func_name in ["max", "sum", "mean", "var", "std"]:  # TODO: prod
       for shape in [(3,), (3, 4), (3, 4, 5)]:
         self._test_reduce(func_name, shape, axis=None)
         for axis in range(len(shape)):
           self._test_reduce(func_name, shape, axis=axis)
 
   def test_composite_00(self):  # softmax
-    # TODO: 0-axis still broken, likely add backward shape problem
-    for axis in [None, 1]:
+    for axis in [None, 0, 1]:
       x_np = np.array([[0.7, 0.2, 0.1], [0.2, 0.3, 0.88]]).astype(np.float32)
       x = Tensor(x_np, requires_grad=True)
       out = x.softmax(axis=axis)
