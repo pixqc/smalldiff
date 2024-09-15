@@ -67,8 +67,8 @@ class Tensor:
   def neg(self):
     return self * (-1)
 
-  def reciprocal(self):
-    return self.recip()  # tinygrad compat
+  def reciprocal(self):  # tinygrad compat
+    return self.recip()
 
   def add(self, x, reverse=False):
     if reverse:
@@ -92,6 +92,7 @@ class Tensor:
     return self * x.recip()
 
   def dot(self, x):
+    # can be a composition of mul, add, reshape
     return Dot.apply(self, x)
 
   def matmul(self, x):
