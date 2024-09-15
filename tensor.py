@@ -35,7 +35,7 @@ class Tensor:
     return self.data.dtype
 
   @staticmethod
-  def rand(*shape, **kwargs):
+  def randn(*shape, **kwargs):
     return Tensor(np.random.randn(*shape), **kwargs)
 
   @staticmethod
@@ -45,6 +45,8 @@ class Tensor:
   @staticmethod
   def zeros_like(*shape) -> Tensor:
     return Tensor(np.zeros(shape))
+
+  # -- unary ops --
 
   def numpy(self):
     return self.data
@@ -70,26 +72,20 @@ class Tensor:
   def reciprocal(self):  # tinygrad compat
     return self.recip()
 
+  # -- binary ops --
+
   def add(self, x, reverse=False):
-    if reverse:
-      self, x = x, self
-    return Add.apply(self, x)
+    return Add.apply(self, x) if not reverse else Add.apply(x, self)
 
   def mul(self, x, reverse=False):
-    if reverse:
-      self, x = x, self
-    return Mul.apply(self, x)
+    return Mul.apply(self, x) if not reverse else Mul.apply(x, self)
 
   def sub(self, x, reverse=False):
-    if reverse:
-      self, x = x, self
-    return self + (-x)
+    return self + (-x) if not reverse else self + (-x)
 
   def div(self, x, reverse=False):
     x = Tensor(x) if not isinstance(x, Tensor) else x
-    if reverse:
-      self, x = x, self
-    return self * x.recip()
+    return self * x.recip() if not reverse else self * x.recip()
 
   def dot(self, x):
     # can be a composition of mul, add, reshape
@@ -107,6 +103,8 @@ class Tensor:
     elif x == 3: return self * self * self
     else: NotImplementedError(f"pow({self}, {x}) not implemented")  # lol
   # fmt: on
+
+  # -- reduce ops --
 
   def max(self, axis=None, keepdim=False):
     return Max.apply(self, axis=axis, keepdim=keepdim)
@@ -130,6 +128,7 @@ class Tensor:
     y_oh = np.eye(self.shape[-1])[y.data]
     return -self.log_softmax(axis=1).mul(y_oh).sum(axis=1).mean()
 
+  # fmt: off
   __add__ = add
   __mul__ = mul
   __sub__ = sub
@@ -137,18 +136,11 @@ class Tensor:
   __pow__ = pow
   __matmul__ = dot
   __truediv__ = div
-
-  def __radd__(self, x):
-    return self.add(x, reverse=True)
-
-  def __rmul__(self, x):
-    return self.mul(x, reverse=True)
-
-  def __rsub__(self, x):
-    return self.sub(x, reverse=True)
-
-  def __rdiv__(self, x):
-    return self.div(x, reverse=True)
+  def __radd__(self, x): return self.add(x, reverse=True)
+  def __rmul__(self, x): return self.mul(x, reverse=True)
+  def __rsub__(self, x): return self.sub(x, reverse=True)
+  def __rdiv__(self, x): return self.div(x, reverse=True)
+  # fmt: on
 
   # ----- backward -----
 
