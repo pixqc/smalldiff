@@ -44,6 +44,7 @@ def load_mnist(data_dir="./data"):
     with open(file_path, "rb") as f:
       f.read(16)  # skip header
       data = np.frombuffer(f.read(), dtype=np.uint8).reshape(-1, 28 * 28)
+      data = data.astype(np.float32) / 255.0
     return data
 
   def load_labels(file_path):
