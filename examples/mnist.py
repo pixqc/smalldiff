@@ -4,7 +4,7 @@ from typing import List, Optional
 import numpy as np
 
 from helpers import load_mnist
-from tensor import SGD, Tensor
+from tensor import AdamW, Tensor
 
 
 class Model:
@@ -46,12 +46,12 @@ if __name__ == "__main__":
   normalize = lambda x: x.astype(np.float32) / 255.0
   x_train, y_train, x_test, y_test = load_mnist()
   x_train, x_test = normalize(x_train), normalize(x_test)
-  batch_size = 50
-  epochs = 50
+  batch_size = 500
+  epochs = 10
   num_batches = x_train.shape[0] // batch_size
 
   model = Model()
-  optimizer = SGD(model.params(), lr=0.01)
+  optimizer = AdamW(model.params(), lr=0.01)
 
   print("mnist start train...")
   for epoch in range(epochs):
@@ -73,7 +73,7 @@ if __name__ == "__main__":
 
     print(f"epoch: {epoch+1}; loss: {loss.numpy()}")
 
-    if epoch % 5 == 0 and epoch != 0:
+    if (epoch + 1) % 5 == 0 or epoch == epochs - 1:
       out_test = model(Tensor(x_test))
       predictions = out_test.data.argmax(axis=1)
       accuracy = np.mean(predictions == y_test)

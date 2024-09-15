@@ -396,16 +396,55 @@ class Sum(Function):
     prev.grad = grad if prev.grad is None else prev.grad + grad
 
 
-class SGD:
-  def __init__(self, parameters, lr=0.01):
+class Optimizer:
+  def __init__(self, parameters: List[Tensor], lr=0.01):
     self.parameters = parameters
-    self.lr = lr
+    for param in self.parameters:
+      param.requires_grad = True
+    self.lr: float = lr
 
   def step(self):
-    for param in self.parameters:
-      param.data -= self.lr * param.grad
+    NotImplementedError("step not implemented")
 
   def zero_grad(self):
     for param in self.parameters:
       param.grad = None
       param._ctx = None  # cleanup computational graph
+
+
+class SGD(Optimizer):
+  def step(self):
+    for p in self.parameters:
+      if p.grad is not None:
+        p.data -= p.grad * self.lr
+
+
+class AdamW(Optimizer):
+  def __init__(
+    self,
+    parameters: List[Tensor],
+    lr=1e-3,
+    betas=(0.9, 0.999),
+    eps=1e-8,
+    weight_decay=0.0,
+  ):
+    super().__init__(parameters, lr)
+    self.betas = betas
+    self.eps = eps
+    self.weight_decay = weight_decay
+    self.t = 0
+    self.ms = [np.zeros_like(p.data) for p in parameters]
+    self.vs = [np.zeros_like(p.data) for p in parameters]
+
+  def step(self):
+    self.t += 1
+    for i, p in enumerate(self.parameters):
+      if p.grad is not None:
+        g = p.grad
+        if self.weight_decay != 0:
+          g = g + self.weight_decay * p.data
+        self.ms[i] = self.betas[0] * self.ms[i] + (1 - self.betas[0]) * g
+        self.vs[i] = self.betas[1] * self.vs[i] + (1 - self.betas[1]) * g**2
+        m_hat = self.ms[i] / (1 - self.betas[0] ** self.t)
+        v_hat = self.vs[i] / (1 - self.betas[1] ** self.t)
+        p.data -= self.lr * m_hat / (np.sqrt(v_hat) + self.eps)
