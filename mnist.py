@@ -1,5 +1,6 @@
 import gzip
 import os
+import pickle
 
 import numpy as np
 import requests
@@ -64,14 +65,30 @@ class Model:
     kwargs = {"dtype": np.float32, "requires_grad": True}
     self.w1 = Tensor.rand(784, 128, **kwargs)
     self.b1 = Tensor.rand(128, **kwargs)
-    self.w2 = Tensor.rand(128, 10, **kwargs)
-    self.b2 = Tensor.rand(10, **kwargs)
+    self.w2 = Tensor.rand(128, 64, **kwargs)
+    self.b2 = Tensor.rand(64, **kwargs)
+    self.w3 = Tensor.rand(64, 10, **kwargs)
+    self.b3 = Tensor.rand(10, **kwargs)
 
   def __call__(self, x):
-    return ((x @ self.w1 + self.b1).tanh()) @ self.w2 + self.b2
+    out = (x @ self.w1 + self.b1).tanh()
+    out = (out @ self.w2 + self.b2).tanh()
+    out = out @ self.w3 + self.b3
+    return out
 
   def params(self):
-    return [self.w1, self.b1, self.w2, self.b2]
+    return [self.w1, self.b1, self.w2, self.b2, self.w3, self.b3]
+
+  def save_weights(self, filepath):
+    with open(filepath, "wb") as f:
+      pickle.dump(self.params(), f)
+    print(f"Weights saved to {filepath}")
+
+  def load_weights(self, filepath):
+    with open(filepath, "rb") as f:
+      params = pickle.load(f)
+    self.w1, self.b1, self.w2, self.b2, self.w3, self.b3 = params
+    print(f"Weights loaded from {filepath}")
 
 
 if __name__ == "__main__":
@@ -108,3 +125,5 @@ if __name__ == "__main__":
       predictions = out_test.data.argmax(axis=1)
       accuracy = np.mean(predictions == y_test)
       print(f"test accuracy: {accuracy:.2f}")
+
+  model.save_weights("./data/mnist.pkl")
