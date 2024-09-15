@@ -417,6 +417,7 @@ class SGD(Optimizer):
     for p in self.parameters:
       if p.grad is not None:
         p.data -= p.grad * self.lr
+    self.zero_grad()
 
 
 class AdamW(Optimizer):
@@ -448,3 +449,4 @@ class AdamW(Optimizer):
         m_hat = self.ms[i] / (1 - self.betas[0] ** self.t)
         v_hat = self.vs[i] / (1 - self.betas[1] ** self.t)
         p.data -= self.lr * m_hat / (np.sqrt(v_hat) + self.eps)
+    self.zero_grad()

@@ -69,7 +69,6 @@ if __name__ == "__main__":
       loss = out.cross_entropy(y_batch)
       loss.backward()
       optimizer.step()
-      optimizer.zero_grad()
 
     print(f"epoch: {epoch+1}; loss: {loss.numpy()}")
 
