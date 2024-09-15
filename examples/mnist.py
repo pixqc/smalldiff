@@ -1,6 +1,7 @@
 import gzip
 import os
 import pickle
+from typing import List, Optional
 
 import numpy as np
 import requests
@@ -62,18 +63,22 @@ def load_mnist(data_dir="./data"):
 
 
 class Model:
-  def __init__(self):
+  def __init__(self, params: Optional[List[Tensor]] = None):
     kwargs = {"dtype": np.float32, "requires_grad": True}
-    self.w1 = Tensor.rand(784, 128, **kwargs)
-    self.b1 = Tensor.rand(128, **kwargs)
-    self.w2 = Tensor.rand(128, 64, **kwargs)
-    self.b2 = Tensor.rand(64, **kwargs)
-    self.w3 = Tensor.rand(64, 10, **kwargs)
-    self.b3 = Tensor.rand(10, **kwargs)
+
+    if params:
+      self.w1, self.b1, self.w2, self.b2, self.w3, self.b3 = params
+    else:
+      self.w1 = Tensor.randn(784, 128, **kwargs)
+      self.b1 = Tensor.randn(128, **kwargs)
+      self.w2 = Tensor.randn(128, 64, **kwargs)
+      self.b2 = Tensor.randn(64, **kwargs)
+      self.w3 = Tensor.randn(64, 10, **kwargs)
+      self.b3 = Tensor.randn(10, **kwargs)
 
   def __call__(self, x):
-    out = (x @ self.w1 + self.b1).tanh()
-    out = (out @ self.w2 + self.b2).tanh()
+    out = (x @ self.w1 + self.b1).batchnorm().tanh()
+    out = (out @ self.w2 + self.b2).batchnorm().tanh()
     out = out @ self.w3 + self.b3
     return out
 

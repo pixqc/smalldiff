@@ -116,13 +116,23 @@ class Tensor:
     divisor = np.prod(self.shape) if axis is None else self.shape[axis]
     return self.sum(axis=axis, keepdim=keepdim) / divisor
 
-  def softmax(self, axis: Optional[int] = -1):
-    t = self
-    kwargs = {"axis": axis, "keepdim": True}
-    return (t - t.max(**kwargs)).exp() / (t - t.max(**kwargs)).exp().sum(**kwargs)
+  def var(self, axis=None, keepdim=False):
+    return (
+      self.mean(axis=axis, keepdim=keepdim) - self.mean(axis=axis, keepdim=keepdim) ** 2
+    )
 
-  def log_softmax(self, axis: Optional[int] = -1):
-    return self.softmax(axis=axis).add(1e-10).log()
+  def _softmax(self, axis):  # from tinygrad's Tensor.softmax
+    m = self - self.max(axis=axis, keepdim=True)
+    e = m.exp()
+    return m, e, e.sum(axis=axis, keepdim=True)
+
+  def softmax(self, axis=-1):
+    _, e, ss = self._softmax(axis)
+    return e.div(ss)
+
+  def log_softmax(self, axis=-1):
+    m, _, ss = self._softmax(axis)
+    return m - ss.log()
 
   def cross_entropy(self, y):
     y_oh = np.eye(self.shape[-1])[y.data]
