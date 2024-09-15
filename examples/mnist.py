@@ -1,65 +1,10 @@
-import gzip
-import os
 import pickle
 from typing import List, Optional
 
 import numpy as np
-import requests
 
+from helpers import load_mnist
 from tensor import SGD, Tensor
-
-
-def download_mnist(data_dir="./data"):
-  base_url = "https://storage.googleapis.com/cvdf-datasets/mnist/"
-  files = [
-    "train-images-idx3-ubyte",
-    "train-labels-idx1-ubyte",
-    "t10k-images-idx3-ubyte",
-    "t10k-labels-idx1-ubyte",
-  ]
-
-  os.makedirs(data_dir, exist_ok=True)
-  for filename in files:
-    gz_path = os.path.join(data_dir, filename + ".gz")
-    extracted_path = os.path.join(data_dir, filename)
-
-    if not os.path.exists(gz_path):
-      print(f"downloading {filename}.gz...")
-      r = requests.get(base_url + filename + ".gz", stream=True)
-      with open(gz_path, "wb") as f:
-        for chunk in r.iter_content(chunk_size=1024):
-          if chunk:
-            f.write(chunk)
-
-    if not os.path.exists(extracted_path):
-      print(f"extracting {filename}.gz...")
-      with gzip.open(gz_path, "rb") as f_in:
-        with open(extracted_path, "wb") as f_out:
-          f_out.write(f_in.read())
-
-  print("mnist downloaded")
-
-
-def load_mnist(data_dir="./data"):
-  def load_images(file_path):
-    with open(file_path, "rb") as f:
-      f.read(16)  # skip header
-      data = np.frombuffer(f.read(), dtype=np.uint8).reshape(-1, 28 * 28)
-      data = data.astype(np.float32) / 255.0
-    return data
-
-  def load_labels(file_path):
-    with open(file_path, "rb") as f:
-      f.read(8)  # skip header
-      labels = np.frombuffer(f.read(), dtype=np.uint8)
-    return labels
-
-  x_train = load_images(os.path.join(data_dir, "train-images-idx3-ubyte"))
-  y_train = load_labels(os.path.join(data_dir, "train-labels-idx1-ubyte"))
-  x_test = load_images(os.path.join(data_dir, "t10k-images-idx3-ubyte"))
-  y_test = load_labels(os.path.join(data_dir, "t10k-labels-idx1-ubyte"))
-
-  return x_train, y_train, x_test, y_test
 
 
 class Model:
@@ -67,7 +12,7 @@ class Model:
     kwargs = {"dtype": np.float32, "requires_grad": True}
 
     if params:
-      self.w1, self.b1, self.w2, self.b2, self.w3, self.b3 = params
+      (self.w1, self.b1, self.w2, self.b2, self.w3, self.b3) = params
     else:
       self.w1 = Tensor.randn(784, 128, **kwargs)
       self.b1 = Tensor.randn(128, **kwargs)
@@ -77,8 +22,8 @@ class Model:
       self.b3 = Tensor.randn(10, **kwargs)
 
   def __call__(self, x):
-    out = (x @ self.w1 + self.b1).batchnorm().tanh()
-    out = (out @ self.w2 + self.b2).batchnorm().tanh()
+    out = (x @ self.w1 + self.b1)._batchnorm().tanh()
+    out = (out @ self.w2 + self.b2)._batchnorm().tanh()
     out = out @ self.w3 + self.b3
     return out
 
@@ -93,12 +38,14 @@ class Model:
   def load_weights(self, filepath):
     with open(filepath, "rb") as f:
       params = pickle.load(f)
-    self.w1, self.b1, self.w2, self.b2, self.w3, self.b3 = params
+    (self.w1, self.b1, self.w2, self.b2, self.w3, self.b3) = params
     print(f"Weights loaded from {filepath}")
 
 
 if __name__ == "__main__":
+  normalize = lambda x: x.astype(np.float32) / 255.0
   x_train, y_train, x_test, y_test = load_mnist()
+  x_train, x_test = normalize(x_train), normalize(x_test)
   batch_size = 50
   epochs = 50
   num_batches = x_train.shape[0] // batch_size

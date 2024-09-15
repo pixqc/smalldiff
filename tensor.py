@@ -44,12 +44,20 @@ class Tensor:
     return Tensor(np.random.randn(*shape), **kwargs)
 
   @staticmethod
-  def ones_like(*shape) -> Tensor:
-    return Tensor(np.ones(shape))
+  def zeros(*shape, **kwargs):
+    return Tensor(np.zeros(shape), **kwargs)
 
   @staticmethod
   def zeros_like(*shape) -> Tensor:
     return Tensor(np.zeros(shape))
+
+  @staticmethod
+  def ones(*shape, **kwargs):
+    return Tensor(np.ones(shape), **kwargs)
+
+  @staticmethod
+  def ones_like(*shape) -> Tensor:
+    return Tensor(np.ones(shape))
 
   # -- unary ops --
 
@@ -74,6 +82,9 @@ class Tensor:
   def sqrt(self):
     return Sqrt.apply(self)
 
+  def rsqrt(self):
+    return self.sqrt().recip()
+
   def neg(self):
     return self * (-1)
 
@@ -83,7 +94,10 @@ class Tensor:
   def square(self):
     return self * self
 
-  def batchnorm(self, weight, bias, mean, invstd):
+  def _batchnorm(self, axis=None):  # without affine
+    return (self - self.mean(axis=axis)) * self.var(axis=axis).add(1e-5).rsqrt()
+
+  def batchnorm(self):  # use _batchnorm + affine (scale, shift)
     pass
 
   # -- binary ops --

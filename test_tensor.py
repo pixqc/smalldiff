@@ -12,7 +12,7 @@ tol_kwargs = {"atol": 1e-5, "rtol": 1e-5, "equal_nan": False}
 class TestGrad(unittest.TestCase):
   def _test_unary(self, func_name: str, shape: tuple[int, ...]):
     x_np = np.random.randn(*shape).astype(np.float32)
-    x_np = np.clip(x_np, 1e-6, 1) if func_name in ["log", "sqrt"] else x_np
+    x_np = np.clip(x_np, 1e-6, 1) if func_name in ["log", "sqrt", "rsqrt"] else x_np
 
     x = Tensor(x_np, requires_grad=True)
     out = getattr(x, func_name)()
@@ -29,7 +29,7 @@ class TestGrad(unittest.TestCase):
     self.assertTrue(np.allclose(x.grad, x_t.grad.numpy(), **tol_kwargs))  # type: ignore
 
   def test_unary(self):
-    for func_name in ["relu", "tanh", "log", "exp", "sqrt", "neg", "reciprocal"]:
+    for func_name in ["relu", "tanh", "log", "exp", "sqrt", "rsqrt", "neg", "reciprocal"]:  # fmt: skip
       for shape in [(3,), (3, 4), (2, 3, 4)]:
         self._test_unary(func_name, shape)
 
