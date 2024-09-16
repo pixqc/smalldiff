@@ -6,10 +6,6 @@ from typing import List, Optional, Union
 import numpy as np
 
 
-def prod(xs):
-  return functools.reduce(lambda x, y: x * y, xs)
-
-
 class Tensor:
   def __init__(
     self,
@@ -146,6 +142,7 @@ class Tensor:
     return self.sum(axis=axis, keepdim=keepdim) / divisor
 
   def var(self, axis=None, keepdim=False, correction=1):
+    prod = lambda xs: functools.reduce(lambda x, y: x * y, xs)
     squares = (self - self.mean(axis=axis, keepdim=True)).square()
     n = prod([si for si, so in zip(self.shape, squares.sum(axis=axis, keepdim=True).shape)if si != so])  # fmt: skip
     return squares.sum(axis=axis, keepdim=keepdim).div(max(0, n - correction))
@@ -397,49 +394,62 @@ class Sum(Function):
 
 
 class Optimizer:
-  def __init__(self, parameters: List[Tensor], lr=0.01):
-    self.parameters = parameters
-    for param in self.parameters:
-      param.requires_grad = True
-    self.lr: float = lr
+  def __init__(self, params: List[Tensor]):
+    self.params = params
 
   def step(self):
     NotImplementedError("step not implemented")
 
   def zero_grad(self):
-    for param in self.parameters:
+    for param in self.params:
       param.grad = None
       param._ctx = None  # cleanup computational graph
 
 
 class SGD(Optimizer):
+  def __init__(self, params: List[Tensor], lr, momentum=None, weight_decay=0.0):
+    super().__init__(params)
+    self.lr = lr
+    self.momentum = momentum
+    self.weight_decay = weight_decay
+    self.prev_grads = [np.zeros_like(p.data) for p in params]
+
   def step(self):
-    for p in self.parameters:
+    for i, p in enumerate(self.params):
       if p.grad is not None:
-        p.data -= p.grad * self.lr
+        g = p.grad
+        if self.weight_decay > 0:
+          g += self.weight_decay * p.data
+        if self.momentum:
+          g = self.momentum * self.prev_grads[i] + self.lr * g
+        else:
+          g = self.lr * g
+        p.data -= g
+        self.prev_grads[i] = g
     self.zero_grad()
 
 
 class AdamW(Optimizer):
   def __init__(
     self,
-    parameters: List[Tensor],
+    params: List[Tensor],
     lr=1e-3,
     betas=(0.9, 0.999),
     eps=1e-8,
     weight_decay=0.0,
   ):
-    super().__init__(parameters, lr)
+    super().__init__(params)
+    self.lr = lr
     self.betas = betas
     self.eps = eps
     self.weight_decay = weight_decay
     self.t = 0
-    self.ms = [np.zeros_like(p.data) for p in parameters]
-    self.vs = [np.zeros_like(p.data) for p in parameters]
+    self.ms = [np.zeros_like(p.data) for p in params]
+    self.vs = [np.zeros_like(p.data) for p in params]
 
   def step(self):
     self.t += 1
-    for i, p in enumerate(self.parameters):
+    for i, p in enumerate(self.params):
       if p.grad is not None:
         g = p.grad
         if self.weight_decay != 0:

@@ -4,7 +4,7 @@ from typing import List, Optional
 import numpy as np
 
 from helpers import load_mnist
-from tensor import AdamW, Tensor
+from tensor import SGD, Tensor
 
 
 class Model:
@@ -22,8 +22,8 @@ class Model:
       self.b3 = Tensor.randn(10, **kwargs)
 
   def __call__(self, x):
-    out = (x @ self.w1 + self.b1)._batchnorm().tanh()
-    out = (out @ self.w2 + self.b2)._batchnorm().tanh()
+    out = (x @ self.w1 + self.b1)._batchnorm().relu()
+    out = (out @ self.w2 + self.b2)._batchnorm().relu()
     out = out @ self.w3 + self.b3
     return out
 
@@ -51,7 +51,7 @@ if __name__ == "__main__":
   num_batches = x_train.shape[0] // batch_size
 
   model = Model()
-  optimizer = AdamW(model.params(), lr=0.01)
+  optimizer = SGD(model.params(), lr=0.01, momentum=None, weight_decay=0.1)
 
   print("mnist start train...")
   for epoch in range(epochs):
