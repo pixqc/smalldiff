@@ -51,7 +51,7 @@ if __name__ == "__main__":
   num_batches = x_train.shape[0] // batch_size
 
   model = Model()
-  optimizer = SGD(model.params(), lr=0.01, momentum=None, weight_decay=0.1)
+  optimizer = SGD(model.params(), lr=0.01, momentum=0.9, weight_decay=0.1)
 
   print("mnist start train...")
   for epoch in range(epochs):

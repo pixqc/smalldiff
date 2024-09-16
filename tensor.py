@@ -407,7 +407,7 @@ class Optimizer:
 
 
 class SGD(Optimizer):
-  def __init__(self, params: List[Tensor], lr, momentum=None, weight_decay=0.0):
+  def __init__(self, params: List[Tensor], lr, momentum=0.0, weight_decay=0.0):
     super().__init__(params)
     self.lr = lr
     self.momentum = momentum
@@ -417,13 +417,8 @@ class SGD(Optimizer):
   def step(self):
     for i, p in enumerate(self.params):
       if p.grad is not None:
-        g = p.grad
-        if self.weight_decay > 0:
-          g += self.weight_decay * p.data
-        if self.momentum:
-          g = self.momentum * self.prev_grads[i] + self.lr * g
-        else:
-          g = self.lr * g
+        g = p.grad + self.weight_decay * p.data if self.weight_decay > 0 else p.grad
+        g = self.momentum * self.prev_grads[i] + self.lr * g
         p.data -= g
         self.prev_grads[i] = g
     self.zero_grad()
