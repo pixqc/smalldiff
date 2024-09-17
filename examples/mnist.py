@@ -1,3 +1,5 @@
+# to run: PYTHONPATH="." python examples/mnist.py
+
 import pickle
 from typing import List, Optional
 
