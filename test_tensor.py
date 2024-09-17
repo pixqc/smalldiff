@@ -2,7 +2,7 @@ import unittest
 from typing import Optional
 
 import numpy as np
-from tinygrad import Tensor as TinyTensor
+from tinygrad.tensor import Tensor as TinyTensor
 
 from tensor import Tensor
 
