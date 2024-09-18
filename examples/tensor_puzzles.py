@@ -49,6 +49,11 @@ def triu(t: Tensor) -> Tensor:
   return (arange(t.shape[0])[:, None] <= arange(t.shape[0])).where(1, 0) * t
 
 
+# puzzle 7: cumsum
+def cumsum(t: Tensor) -> Tensor:
+  return sum(triu(t))
+
+
 # --- tests ---
 
 for _ in range(3):
@@ -80,5 +85,10 @@ for _ in range(3):
   shape = np.random.randint(1, 10)
   t = Tensor(np.random.randn(shape, shape).astype(np.float32))
   assert np.allclose(np.triu(t.numpy()), triu(t).numpy())
+
+for _ in range(3):
+  shape = np.random.randint(1, 10)
+  t = Tensor(np.random.rand(shape).astype(np.float32))
+  assert np.allclose(np.cumsum(t.numpy()), cumsum(t).numpy())
 
 print("all tests passed!")
