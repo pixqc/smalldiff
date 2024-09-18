@@ -44,6 +44,11 @@ def eye(i: int) -> Tensor:
   return arange(i)[:, None] == arange(i)
 
 
+# puzzle 6: triu
+def triu(t: Tensor) -> Tensor:
+  return (arange(t.shape[0])[:, None] <= arange(t.shape[0])).where(1, 0) * t
+
+
 # --- tests ---
 
 for _ in range(3):
@@ -70,5 +75,10 @@ for _ in range(3):
 for _ in range(3):
   i = np.random.randint(1, 10)
   assert np.allclose(np.eye(i), eye(i).numpy())
+
+for _ in range(3):
+  shape = np.random.randint(1, 10)
+  t = Tensor(np.random.randn(shape, shape).astype(np.float32))
+  assert np.allclose(np.triu(t.numpy()), triu(t).numpy())
 
 print("all tests passed!")
