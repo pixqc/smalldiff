@@ -4,6 +4,7 @@ from collections import defaultdict
 
 import numpy as np
 
+# TODO: s/tinygrad.tensor/tensor
 from helpers import load_shakespeare
 
 
@@ -11,6 +12,8 @@ class Tokenizer:
   def __init__(self, text, iters=10):
     self.iters = iters
     self.m, self.rm = self.map_tokens(text)
+    self.vocab = set(list(self.m.keys()) + Tokenizer.to_byte_list(text))
+    self.idx, self.ridx = self.index_tokens()
 
   @staticmethod
   def to_byte_list(text):
@@ -57,6 +60,11 @@ class Tokenizer:
     rm = {v: k for k, v in m.items()}
     return m, rm
 
+  def index_tokens(self):
+    idx = {v: i for i, v in enumerate(self.vocab)}
+    ridx = {i: v for i, v in enumerate(self.vocab)}
+    return idx, ridx
+
   def tokenize(self, byte_list):
     def _tokenize(rm, bytes_input):
       tokenized = []
@@ -97,32 +105,42 @@ class Tokenizer:
     return detokenized
 
   def encode(self, text):
-    self.map_tokens(text)
     byte_list = self.to_byte_list(text)
-    return self.tokenize(byte_list)
+    tokens = self.tokenize(byte_list)
+    return [self.idx[token] for token in tokens]
 
   def decode(self, tokens):
-    byte_list = self.detokenize(tokens)
+    byte_list = self.detokenize([self.ridx[token] for token in tokens])
     return self.to_text(byte_list)
 
 
 if __name__ == "__main__":
-  text = load_shakespeare()[:20]
-  tokenizer = Tokenizer(text=text, iters=10)
+  text = load_shakespeare()[:100]
+  tokenizer = Tokenizer(text=text, iters=100)
   tokens = tokenizer.encode(text)
+  text2 = tokenizer.decode(tokens)
 
-  block_size = 8
+  seq_len = 8
+  vocab_size = len(tokenizer.vocab)
+  dim = 16
+
   trils = []
   ys = []
-  for i in range(len(tokens) - block_size + 1):
-    tmp = np.tril(tokens[i : i + block_size])
+  for i in range(len(tokens) - seq_len + 1):
+    tmp = np.tril(tokens[i : i + seq_len])
     trils.append(tmp)
-    tmp_y = tokens[i + 1 : i + block_size + 1]
+    tmp_y = tokens[i + 1 : i + seq_len + 1]
     ys.append(tmp_y)
 
   xs = np.vstack(trils)[:-1]  # last one doesn't have a y
   ys = np.concatenate(ys)
-  print(xs)
-  print(ys)
-  print(xs.shape)
-  print(ys.shape)
+
+  # positional encoding
+  position = np.arange(seq_len)
+  div_term = np.exp(np.arange(0, dim, 2) * -(np.log(10000.0) / dim))
+  pos_encoding = np.zeros((dim, seq_len))
+  pos_encoding[0] = np.sin(position * div_term)
+  pos_encoding[1] = np.cos(position * div_term)
+
+  embeddings = np.random.randn(vocab_size, dim)
+  positioned_emb = np.transpose(embeddings[xs], (0, 2, 1)) + pos_encoding
