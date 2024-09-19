@@ -36,3 +36,20 @@ def load_mnist(data_dir="./data"):
   x_test = _load(os.path.join(data_dir, files[2]), 16, np.uint8, (-1, 28 * 28))
   y_test = _load(os.path.join(data_dir, files[3]), 8, np.uint8, -1)
   return x_train, y_train, x_test, y_test
+
+
+def load_shakespeare(data_dir="./data"):
+  os.makedirs(data_dir, exist_ok=True)
+  base_url = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
+  file_path = os.path.join(data_dir, "tinyshakespeare.txt")
+
+  if not os.path.exists(file_path):
+    print("downloading tiny shakespeare...")
+    with open(file_path, "wb") as f_out:
+      f_out.write(requests.get(base_url).content)
+
+  # Read the text file
+  with open(file_path, "r", encoding="utf-8") as f:
+    data = f.read()
+
+  return data

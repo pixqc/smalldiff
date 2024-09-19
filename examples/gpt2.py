@@ -3,6 +3,8 @@
 
 from collections import defaultdict
 
+from helpers import load_shakespeare
+
 
 def to_byte_list(text: str) -> list[int]:
   return [b for c in text for b in c.encode("utf8")]
@@ -96,11 +98,7 @@ def detokenize(m: dict[int, tuple[int, int]], tokens):
   return detokenized
 
 
-m = map_token("aaabdaaabac")
-new_bytes = to_byte_list("aaabdaaabac")
-a = tokenize(m, new_bytes)
-b = detokenize(m, a)
-print(a)
-print(b)
-print("aaabdaaabac")
-print(to_text(b))
+text = load_shakespeare()
+m = map_token(text)
+toks = tokenize(m, to_byte_list(text))
+print(toks)
