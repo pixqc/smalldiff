@@ -1,7 +1,8 @@
 # to run: ls examples/gpt2.py | entr -s 'PYTHONPATH="." python3 examples/gpt2.py'
 
-
 from collections import defaultdict
+
+import numpy as np
 
 from helpers import load_shakespeare
 
@@ -98,7 +99,29 @@ def detokenize(m: dict[int, tuple[int, int]], tokens):
   return detokenized
 
 
-text = load_shakespeare()
+text = load_shakespeare()[:20]
 m = map_token(text)
-toks = tokenize(m, to_byte_list(text))
-print(toks)
+tokens = tokenize(m, to_byte_list(text))
+
+train_size = int(len(tokens) * 0.9)
+train_tokens = np.array(tokens[:train_size])
+test_tokens = np.array(tokens[train_size:])
+
+block_size = 8
+
+trils = []
+ys = []
+
+block_size = 8
+for i in range(len(tokens) - block_size + 1):
+  tmp = np.tril(tokens[i : i + block_size])
+  trils.append(tmp)
+  tmp_y = tokens[i + 1 : i + block_size + 1]
+  ys.append(tmp_y)
+
+xs = np.vstack(trils)[:-1]  # last one doesn't have a y
+ys = np.concatenate(ys)
+print(xs)
+print(ys)
+print(xs.shape)
+print(ys.shape)
