@@ -1,6 +1,6 @@
 # to run: ls examples/gpt2.py | entr -s 'PYTHONPATH="." python3 examples/gpt2.py'
 
-from collections import defaultdict
+from collections import Counter
 
 import numpy as np
 
@@ -12,33 +12,32 @@ class Tokenizer:
   def __init__(self, text, iters=10):
     self.iters = iters
     self.m, self.rm = self.map_tokens(text)
-    self.vocab = set(list(self.m.keys()) + Tokenizer.to_byte_list(text))
+    self.vocab = set(list(self.m.keys()) + self.to_byte_list(text))
     self.idx, self.ridx = self.index_tokens()
 
   @staticmethod
   def to_byte_list(text):
-    return [b for c in text for b in c.encode("utf8")]
+    return list(text.encode("utf-8"))
 
   @staticmethod
   def to_text(byte_list):
-    return "".join([chr(b) for b in byte_list])
+    return bytes(byte_list).decode("utf-8")
 
   def get_max_pair(self, byte_list):
-    d = defaultdict(int)
-    for pair in zip(byte_list, byte_list[1:]):
-      d[pair] += 1
-    if not d:
+    if len(byte_list) < 2:
       return None
-    if set(d.values()) == {1}:  # nothing to compress
+    pair_counts = Counter(zip(byte_list, byte_list[1:]))
+    most_common = pair_counts.most_common(1)
+    if not most_common or most_common[0][1] == 1:
       return None
-    return max(d, key=d.get)  # type: ignore
+    return most_common[0][0]
 
-  def merge_max_pair(self, byte_list, max_pair, token):
-    i = 0
+  def merge_max_pair(self, byte_list, max_pair, new_token):
     merged = []
+    i = 0
     while i < len(byte_list):
       if i < len(byte_list) - 1 and (byte_list[i], byte_list[i + 1]) == max_pair:
-        merged.append(token)
+        merged.append(new_token)
         i += 2
       else:
         merged.append(byte_list[i])
@@ -66,43 +65,31 @@ class Tokenizer:
     return idx, ridx
 
   def tokenize(self, byte_list):
-    def _tokenize(rm, bytes_input):
-      tokenized = []
-      i = 0
-      while i < len(bytes_input):
-        if i + 1 < len(bytes_input):
-          pair = (bytes_input[i], bytes_input[i + 1])
-          tok = rm.get(pair)
-          if tok is not None:
-            tokenized.append(tok)
-            i += 2
-            continue
-        tokenized.append(bytes_input[i])
+    tokens = byte_list.copy()
+    i = 0
+    while i < len(tokens) - 1:
+      pair = (tokens[i], tokens[i + 1])
+      if pair in self.rm:
+        tokens[i] = self.rm[pair]
+        del tokens[i + 1]
+        # after merging, check previous token again
+        if i > 0:
+          i -= 1
+      else:
         i += 1
-      return tokenized
-
-    rm = self.rm
-    prev = []
-    tokenized = _tokenize(rm, byte_list)
-    while tokenized != prev:
-      prev = tokenized
-      tokenized = _tokenize(rm, tokenized)
-    return tokenized
+    return tokens
 
   def detokenize(self, tokens):
-    def _detokenize(mapping, tokens_input):
-      detokenized = []
-      for tok in tokens_input:
-        if tok in mapping:
-          detokenized.extend(mapping[tok])
-        else:
-          detokenized.append(tok)
-      return detokenized
-
-    detokenized = _detokenize(self.m, tokens)
-    while any(tok >= 256 for tok in detokenized):
-      detokenized = _detokenize(self.m, detokenized)
-    return detokenized
+    tokens = tokens.copy()
+    # must be sorted to do it in one pass
+    sorted_merges = sorted(self.m.items(), key=lambda x: x[0], reverse=True)
+    for new_token, pair in sorted_merges:
+      i = 0
+      while i < len(tokens):
+        if tokens[i] == new_token:
+          tokens[i : i + 1] = list(pair)
+        i += 1
+    return tokens
 
   def encode(self, text):
     byte_list = self.to_byte_list(text)
@@ -119,6 +106,8 @@ if __name__ == "__main__":
   tokenizer = Tokenizer(text=text, iters=100)
   tokens = tokenizer.encode(text)
   text2 = tokenizer.decode(tokens)
+  print(text)
+  print(text2)
 
   seq_len = 8
   vocab_size = len(tokenizer.vocab)
@@ -144,3 +133,4 @@ if __name__ == "__main__":
 
   embeddings = np.random.randn(vocab_size, dim)
   positioned_emb = np.transpose(embeddings[xs], (0, 2, 1)) + pos_encoding
+  print(positioned_emb.shape)
