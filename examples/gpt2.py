@@ -101,18 +101,7 @@ class Tokenizer:
     return self.to_text(byte_list)
 
 
-if __name__ == "__main__":
-  text = load_shakespeare()[:100]
-  tokenizer = Tokenizer(text=text, iters=100)
-  tokens = tokenizer.encode(text)
-  text2 = tokenizer.decode(tokens)
-  print(text)
-  print(text2)
-
-  seq_len = 8
-  vocab_size = len(tokenizer.vocab)
-  dim = 16
-
+def prep_input(tokens, seq_len):
   trils = []
   ys = []
   for i in range(len(tokens) - seq_len + 1):
@@ -123,6 +112,20 @@ if __name__ == "__main__":
 
   xs = np.vstack(trils)[:-1]  # last one doesn't have a y
   ys = np.concatenate(ys)
+  return xs, ys
+
+
+if __name__ == "__main__":
+  text = load_shakespeare()[:100]
+  tokenizer = Tokenizer(text=text, iters=100)
+  tokens = tokenizer.encode(text)
+  text2 = tokenizer.decode(tokens)
+
+  seq_len = 8
+  vocab_size = len(tokenizer.vocab)
+  dim = 16
+
+  xs, ys = prep_input(tokens, seq_len)
 
   # positional encoding
   position = np.arange(seq_len)
@@ -132,5 +135,21 @@ if __name__ == "__main__":
   pos_encoding[1] = np.cos(position * div_term)
 
   embeddings = np.random.randn(vocab_size, dim)
-  positioned_emb = np.transpose(embeddings[xs], (0, 2, 1)) + pos_encoding
-  print(positioned_emb.shape)
+  positioned_emb = embeddings[xs] + pos_encoding.T
+
+  W_q = np.random.randn(dim, dim)
+  W_k = np.random.randn(dim, dim)
+  W_v = np.random.randn(dim, dim)
+
+  Q = np.dot(positioned_emb, W_q)
+  K = np.dot(positioned_emb, W_k)
+  V = np.dot(positioned_emb, W_v)
+
+  d_k = Q.shape[-1]
+  scores = np.matmul(Q, K.transpose(0, 2, 1)) / np.sqrt(d_k)
+  mask = np.tril(np.ones((seq_len, seq_len)))
+  scores = np.where(mask == 1, scores, -np.inf)
+  weights = np.exp(scores - np.max(scores, axis=-1, keepdims=True))
+  weights = weights / np.sum(weights, axis=-1, keepdims=True)
+  output = weights @ V
+  print(output.shape)
