@@ -141,6 +141,19 @@ class Head:
     return scores @ V
 
 
+class Attention:
+  def __init__(self, C, n_heads):
+    self.heads = [Head(C, C // n_heads) for _ in range(n_heads)]
+    self.W_o = Tensor.randn(C, C, requires_grad=True)
+
+  def __call__(self, pe):
+    ho = [h(pe) for h in self.heads]
+    c_ho = ho[0]  # might be a better way to do this
+    for i in range(1, len(ho)):
+      c_ho = c_ho.cat(ho[i], dim=-1)
+    return c_ho @ self.W_o
+
+
 if __name__ == "__main__":
   text = load_shakespeare()[:100]
   tokenizer = Tokenizer(text=text, iters=100)
@@ -161,7 +174,6 @@ if __name__ == "__main__":
   emb = Embedding(len(tokenizer.vocab), C)
   pe = emb(xs) + pe
 
-  h = Head(C, head_size=16)
-  output = h(pe)
-  print("--")
+  attn = Attention(C, n_heads=4)
+  output = attn(pe)
   print(output.shape)
