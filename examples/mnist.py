@@ -5,7 +5,7 @@ from typing import List, Optional
 
 import numpy as np
 
-from helpers import load_mnist
+from helpers import load_mnist, tqdm
 from tensor import SGD, Tensor
 
 
@@ -49,35 +49,23 @@ if __name__ == "__main__":
   x_train, y_train, x_test, y_test = load_mnist()
   x_train, x_test = normalize(x_train), normalize(x_test)
   batch_size = 500
-  epochs = 10
+  steps = 1000
   num_batches = x_train.shape[0] // batch_size
 
   model = Model()
   optimizer = SGD(model.params(), lr=0.01, momentum=0.9, weight_decay=0.1)
 
-  print("mnist start train...")
-  for epoch in range(epochs):
-    shuffle_indices = np.random.permutation(x_train.shape[0])
-    x_train = x_train[shuffle_indices]
-    y_train = y_train[shuffle_indices]
+  for step in tqdm(range(steps), desc="training mnist", unit="step"):
+    idxs = np.random.choice(x_train.shape[0], batch_size, replace=False)
+    x_batch = Tensor(x_train[idxs])
+    y_batch = Tensor(y_train[idxs])
 
-    for batch in range(num_batches):
-      start = batch * batch_size
-      end = start + batch_size
-      x_batch = Tensor(x_train[start:end])
-      y_batch = Tensor(y_train[start:end])
+    out = model(x_batch)
+    loss = out.cross_entropy(y_batch)
+    loss.backward()
+    optimizer.step()
 
-      out = model(x_batch)
-      loss = out.cross_entropy(y_batch)
-      loss.backward()
-      optimizer.step()
-
-    print(f"epoch: {epoch+1}; loss: {loss.numpy()}")
-
-    if (epoch + 1) % 5 == 0 or epoch == epochs - 1:
-      out_test = model(Tensor(x_test))
-      predictions = out_test.data.argmax(axis=1)
-      accuracy = np.mean(predictions == y_test)
-      print(f"test accuracy: {accuracy:.2f}")
-
-  model.save_weights("./data/mnist.pkl")
+  out_test = model(Tensor(x_test))
+  predictions = out_test.data.argmax(axis=1)
+  accuracy = np.mean(predictions == y_test)
+  print(f"accuracy: {accuracy:.2f}")
