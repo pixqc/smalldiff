@@ -3,8 +3,9 @@
 from collections import Counter
 
 import numpy as np
+from tinygrad.nn import Embedding
+from tinygrad.tensor import Tensor
 
-# TODO: s/tinygrad.tensor/tensor
 from helpers import load_shakespeare
 
 
@@ -125,31 +126,30 @@ if __name__ == "__main__":
   B, T, C = 64, 16, 32
 
   xs, ys = prep_input(tokens, T)
-
-  vocab_size = len(tokenizer.vocab)
+  idxs = np.random.choice(xs.shape[0], B, replace=False)
+  xs, ys = Tensor(xs[idxs]), Tensor(ys[idxs])
 
   # positional encoding
-  position = np.arange(T)
-  div_term = np.exp(np.arange(0, C, 2) * -(np.log(10000.0) / C))
-  pos_encoding = np.zeros((C, T))
-  pos_encoding[0] = np.sin(position * div_term)
-  pos_encoding[1] = np.cos(position * div_term)
+  p = Tensor.arange(T)
+  d = (Tensor.arange(0, C, 2) * -(Tensor(10000).log() / C)).exp()
+  sin_p = (p * d).sin()
+  cos_p = (p * d).cos()
+  pe = sin_p.stack(cos_p).repeat(B // 4, 1).T
+  emb = Embedding(len(tokenizer.vocab), C)
+  pe = emb(xs) + pe
 
-  embeddings = np.random.randn(vocab_size, C)
-  positioned_emb = embeddings[xs] + pos_encoding.T
-
-  W_q = np.random.randn(C, C)
-  W_k = np.random.randn(C, C)
-  W_v = np.random.randn(C, C)
-  Q = np.dot(positioned_emb, W_q)
-  K = np.dot(positioned_emb, W_k)
-  V = np.dot(positioned_emb, W_v)
+  W_q = Tensor.randn(C, C, requires_grad=True)
+  W_k = Tensor.randn(C, C, requires_grad=True)
+  W_v = Tensor.randn(C, C, requires_grad=True)
+  Q = pe @ W_q
+  K = pe @ W_k
+  V = pe @ W_v
 
   d_k = Q.shape[-1]
-  scores = np.matmul(Q, K.transpose(0, 2, 1)) / np.sqrt(d_k)
-  mask = np.tril(np.ones((T, T)))
-  scores = np.where(mask == 1, scores, -np.inf)
-  weights = np.exp(scores - np.max(scores, axis=-1, keepdims=True))
-  weights = weights / np.sum(weights, axis=-1, keepdims=True)
-  output = np.matmul(weights, V)
+  scores = Q @ K.transpose(2, 1) / Tensor(d_k).sqrt()
+  mask = Tensor.tril(Tensor.ones((T, T)))
+  scores = Tensor.where(mask == 1, scores, -np.inf)
+  weights = (scores - scores.max(axis=-1, keepdim=True)).exp()
+  weights = weights / weights.sum(axis=-1, keepdim=True)
+  output = weights @ V
   print(output.shape)
