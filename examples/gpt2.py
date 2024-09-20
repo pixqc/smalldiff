@@ -101,13 +101,15 @@ class Tokenizer:
     return self.to_text(byte_list)
 
 
-def prep_input(tokens, seq_len):
+def prep_input(tokens, T):
   trils = []
   ys = []
-  for i in range(len(tokens) - seq_len + 1):
-    tmp = np.tril(tokens[i : i + seq_len])
+
+  # neat trick to right-pad inputs
+  for i in range(len(tokens) - T + 1):
+    tmp = np.tril(tokens[i : i + T])
     trils.append(tmp)
-    tmp_y = tokens[i + 1 : i + seq_len + 1]
+    tmp_y = tokens[i + 1 : i + T + 1]
     ys.append(tmp_y)
 
   xs = np.vstack(trils)[:-1]  # last one doesn't have a y
@@ -119,37 +121,35 @@ if __name__ == "__main__":
   text = load_shakespeare()[:100]
   tokenizer = Tokenizer(text=text, iters=100)
   tokens = tokenizer.encode(text)
-  text2 = tokenizer.decode(tokens)
 
-  seq_len = 8
+  B, T, C = 64, 16, 32
+
+  xs, ys = prep_input(tokens, T)
+
   vocab_size = len(tokenizer.vocab)
-  dim = 16
-
-  xs, ys = prep_input(tokens, seq_len)
 
   # positional encoding
-  position = np.arange(seq_len)
-  div_term = np.exp(np.arange(0, dim, 2) * -(np.log(10000.0) / dim))
-  pos_encoding = np.zeros((dim, seq_len))
+  position = np.arange(T)
+  div_term = np.exp(np.arange(0, C, 2) * -(np.log(10000.0) / C))
+  pos_encoding = np.zeros((C, T))
   pos_encoding[0] = np.sin(position * div_term)
   pos_encoding[1] = np.cos(position * div_term)
 
-  embeddings = np.random.randn(vocab_size, dim)
+  embeddings = np.random.randn(vocab_size, C)
   positioned_emb = embeddings[xs] + pos_encoding.T
 
-  W_q = np.random.randn(dim, dim)
-  W_k = np.random.randn(dim, dim)
-  W_v = np.random.randn(dim, dim)
-
+  W_q = np.random.randn(C, C)
+  W_k = np.random.randn(C, C)
+  W_v = np.random.randn(C, C)
   Q = np.dot(positioned_emb, W_q)
   K = np.dot(positioned_emb, W_k)
   V = np.dot(positioned_emb, W_v)
 
   d_k = Q.shape[-1]
   scores = np.matmul(Q, K.transpose(0, 2, 1)) / np.sqrt(d_k)
-  mask = np.tril(np.ones((seq_len, seq_len)))
+  mask = np.tril(np.ones((T, T)))
   scores = np.where(mask == 1, scores, -np.inf)
   weights = np.exp(scores - np.max(scores, axis=-1, keepdims=True))
   weights = weights / np.sum(weights, axis=-1, keepdims=True)
-  output = weights @ V
+  output = np.matmul(weights, V)
   print(output.shape)
