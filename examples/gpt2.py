@@ -118,6 +118,29 @@ def prep_input(tokens, T):
   return xs, ys
 
 
+class Head:
+  def __init__(self, C, head_size):
+    self.C = C
+    self.head_size = head_size
+
+    self.W_q = Tensor.randn(C, head_size, requires_grad=True)
+    self.W_k = Tensor.randn(C, head_size, requires_grad=True)
+    self.W_v = Tensor.randn(C, head_size, requires_grad=True)
+
+  def __call__(self, pe):
+    Q = pe @ self.W_q
+    K = pe @ self.W_k
+    V = pe @ self.W_v
+
+    # shape = (B, T, T) "how much each token attend to each other"; high = relevant
+    scores = Q @ K.transpose(2, 1) / Tensor(Q.shape[-1]).sqrt()
+    # only pay attention to the prev tokens, not the future ones
+    mask = Tensor.tril(Tensor.ones((pe.shape[1], pe.shape[1])))
+    scores = Tensor.where(mask == 1, scores, -np.inf)
+    scores = scores.softmax()
+    return scores @ V
+
+
 if __name__ == "__main__":
   text = load_shakespeare()[:100]
   tokenizer = Tokenizer(text=text, iters=100)
@@ -138,18 +161,7 @@ if __name__ == "__main__":
   emb = Embedding(len(tokenizer.vocab), C)
   pe = emb(xs) + pe
 
-  W_q = Tensor.randn(C, C, requires_grad=True)
-  W_k = Tensor.randn(C, C, requires_grad=True)
-  W_v = Tensor.randn(C, C, requires_grad=True)
-  Q = pe @ W_q
-  K = pe @ W_k
-  V = pe @ W_v
-
-  d_k = Q.shape[-1]
-  scores = Q @ K.transpose(2, 1) / Tensor(d_k).sqrt()
-  mask = Tensor.tril(Tensor.ones((T, T)))
-  scores = Tensor.where(mask == 1, scores, -np.inf)
-  weights = (scores - scores.max(axis=-1, keepdim=True)).exp()
-  weights = weights / weights.sum(axis=-1, keepdim=True)
-  output = weights @ V
+  h = Head(C, head_size=16)
+  output = h(pe)
+  print("--")
   print(output.shape)
