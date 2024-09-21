@@ -3,7 +3,7 @@
 from collections import Counter
 
 import numpy as np
-from tinygrad.nn import Embedding
+from tinygrad import nn
 from tinygrad.tensor import Tensor
 
 from helpers import load_shakespeare
@@ -133,7 +133,7 @@ class Head:
     V = pe @ self.W_v
 
     # shape = (B, T, T) "how much each token attend to each other"; high = relevant
-    scores = Q @ K.transpose(2, 1) / Tensor(Q.shape[-1]).sqrt()
+    scores = Q @ K.transpose(2, 1) * self.head_size**-0.5
     # only pay attention to the prev tokens, not the future ones
     mask = Tensor.tril(Tensor.ones((pe.shape[1], pe.shape[1])))
     scores = Tensor.where(mask == 1, scores, -np.inf)
@@ -154,14 +154,29 @@ class Attention:
     return c_ho @ self.W_o
 
 
+class Block:
+  def __init__(self, sz):
+    _, _, C, NH, _ = sz
+    self.w = Tensor.randn(C, C, requires_grad=True)  # size: (C,C)
+    self.b = Tensor.randn(C, requires_grad=True)
+    self.attn = Attention(C, NH)
+
+  def __call__(self, x):
+    out = self.attn(x)
+    return (x + out @ self.w + self.b).relu()
+
+
 if __name__ == "__main__":
   text = load_shakespeare()[:100]
   tokenizer = Tokenizer(text=text, iters=100)
   tokens = tokenizer.encode(text)
 
-  B, T, C = 64, 16, 32
+  # block size, seq len, embedding size, num heads, vocab size
+  sz = (64, 16, 32, 4, len(tokenizer.vocab))
+  B, T, C, NH, VS = sz
 
   xs, ys = prep_input(tokens, T)
+  ys = np.eye(VS)[ys].astype(np.int32)
   idxs = np.random.choice(xs.shape[0], B, replace=False)
   xs, ys = Tensor(xs[idxs]), Tensor(ys[idxs])
 
@@ -171,9 +186,15 @@ if __name__ == "__main__":
   sin_p = (p * d).sin()
   cos_p = (p * d).cos()
   pe = sin_p.stack(cos_p).repeat(B // 4, 1).T
-  emb = Embedding(len(tokenizer.vocab), C)
+  emb = nn.Embedding(VS, C)
   pe = emb(xs) + pe
 
-  attn = Attention(C, n_heads=4)
-  output = attn(pe)
-  print(output.shape)
+  blocks = [Block(sz) for _ in range(4)]
+
+  attn_out = pe
+  for block in blocks:
+    attn_out = block(attn_out)
+
+  out = (attn_out @ Tensor.randn(C, VS))[:, -1, :]
+  loss = -out.log_softmax(axis=1).mul(ys).sum(axis=1).mean()
+  print(loss.numpy())
