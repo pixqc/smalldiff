@@ -1,12 +1,14 @@
 # to run: ls examples/gpt2.py | entr -s 'PYTHONPATH="." python3 examples/gpt2.py'
 
 from collections import Counter
+from typing import List
 
 import numpy as np
 from tinygrad import nn
+from tinygrad.nn.optim import AdamW
 from tinygrad.tensor import Tensor
 
-from helpers import load_shakespeare
+from helpers import load_shakespeare, tqdm
 
 
 class Tokenizer:
@@ -117,6 +119,23 @@ def sample_batch(xs, ys, sz):
   return Tensor(xs[idxs]), Tensor(one_hot)
 
 
+class PositionalEncoding:
+  def __init__(self, sz):
+    _, T, C, _, VS = sz
+    self.p = Tensor.arange(T)
+    self.d = (Tensor.arange(0, C, 2) * -(Tensor(10000).log() / C)).exp()
+    self.sin_p = (self.p * self.d).sin()
+    self.cos_p = (self.p * self.d).cos()
+    self.emb = nn.Embedding(VS, C)
+    self.aa = B // 4  # idk what to name this, TODO
+
+  def __call__(self, xs):
+    return self.emb(xs) + self.sin_p.stack(self.cos_p).repeat(self.aa, 1).T
+
+  def params(self):
+    return [self.emb.weight]
+
+
 class Head:
   def __init__(self, C, head_size):
     self.C = C
@@ -139,6 +158,9 @@ class Head:
     scores = scores.softmax()
     return scores @ V
 
+  def params(self):
+    return [self.W_q, self.W_k, self.W_v]
+
 
 class Attention:
   def __init__(self, C, n_heads):
@@ -153,6 +175,12 @@ class Attention:
       c_ho = c_ho.cat(ho[i], dim=-1)
     return c_ho @ self.W_o
 
+  def params(self):
+    params = [self.W_o]
+    for head in self.heads:
+      params.extend(head.params())
+    return params
+
 
 class Block:
   def __init__(self, sz):
@@ -165,9 +193,34 @@ class Block:
     out = self.attn(x)
     return (x + out @ self.w + self.b).gelu()
 
+  def params(self):
+    return [self.w, self.b] + self.attn.params()
+
+
+class Bigram:
+  def __init__(self, sz):
+    _, _, _, _, VS = sz
+    self.emb = nn.Embedding(VS, VS)
+
+  def __call__(self, xs, ys):
+    logits = self.emb(xs)
+    ce = -logits.log_softmax(axis=2).mul(ys).sum(axis=2).mean()  # logits is attn_out
+    return logits, ce
+
+  def generate(self, input):
+    out = self.emb(input)  # assuming B is 1
+    return out[0][-1].argmax()
+
+  def params(self) -> List[Tensor]:
+    return [self.emb.weight]
+
 
 if __name__ == "__main__":
-  text = load_shakespeare()[:1000]
+  is_testing = True
+  text_size = 1000 if is_testing else 100000
+  steps = 200 if is_testing else 2000
+
+  text = load_shakespeare()[:text_size]
   tokenizer = Tokenizer(text=text, iters=100)
   tokens = tokenizer.encode(text)
 
@@ -178,22 +231,40 @@ if __name__ == "__main__":
   xs, ys = prep_input(tokens, T)
   xs, ys = sample_batch(xs, ys, sz)
 
-  # positional encoding
-  p = Tensor.arange(T)
-  d = (Tensor.arange(0, C, 2) * -(Tensor(10000).log() / C)).exp()
-  sin_p = (p * d).sin()
-  cos_p = (p * d).cos()
-  pe = sin_p.stack(cos_p).repeat(B // 4, 1).T
-  emb = nn.Embedding(VS, C)
-  pe = emb(xs) + pe
-
-  blocks = [Block(sz) for _ in range(1)]
-  attn_out = pe
+  # NOTE: note used for now
+  # attn
+  pos_enc = PositionalEncoding(sz)
+  pe = pos_enc(xs)
+  blocks = [Block(sz) for _ in range(4)]
   for block in blocks:
-    attn_out = block(attn_out)
+    pe = block(pe)
 
-  proj_W = Tensor.uniform(C, VS)
-  proj_b = Tensor.uniform(VS)
-  out = attn_out @ proj_W + proj_b
-  loss = -out.log_softmax(axis=2).mul(ys).sum(axis=2).mean()
-  print(loss.numpy())
+  # project it back to vocab size
+  W_proj = Tensor.uniform(C, VS, requires_grad=True)
+  b_proj = Tensor.uniform(VS, requires_grad=True)
+  attn_out = pe @ W_proj + b_proj
+
+  model = Bigram(sz)
+  all_params = model.params() + pos_enc.params() + [W_proj, b_proj]
+  for block in blocks:
+    all_params.extend(block.params())
+  # end of not used for now
+
+  optimizer = AdamW(model.params(), lr=1e-3)
+  with Tensor.train():
+    for step in tqdm(range(steps), desc="training gpt2", unit="step"):
+      logits, loss = model(xs, ys)
+      loss.backward()
+      optimizer.step()
+
+      if step % 100 == 0:
+        print(f"step {step}: loss {loss.numpy():.2f}")
+
+  input = tokenizer.encode("With the")
+  print(tokenizer.decode(input), end="")
+  for i in range(100):
+    tok = model.generate(Tensor(input)).item()
+    assert isinstance(tok, int)
+    print(tokenizer.decode([tok]), end="")
+    input.append(tok)
+    input = input[-T:]
