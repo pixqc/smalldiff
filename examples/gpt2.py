@@ -136,18 +136,18 @@ class PositionalEncoding:
 
 
 class Head:
-  def __init__(self, C, head_size):
-    self.C = C
-    self.head_size = head_size
+  def __init__(self, sz):
+    _, _, C, NH, _ = sz
+    self.head_size = C // NH
 
-    self.W_q = Tensor.uniform(C, head_size, requires_grad=True)
-    self.W_k = Tensor.uniform(C, head_size, requires_grad=True)
-    self.W_v = Tensor.uniform(C, head_size, requires_grad=True)
+    self.W_q = nn.Linear(C, self.head_size, bias=False)
+    self.W_k = nn.Linear(C, self.head_size, bias=False)
+    self.W_v = nn.Linear(C, self.head_size, bias=False)
 
   def __call__(self, pe):
-    Q = pe @ self.W_q
-    K = pe @ self.W_k
-    V = pe @ self.W_v
+    Q = self.W_q(pe)
+    K = self.W_k(pe)
+    V = self.W_v(pe)
 
     # shape = (B, T, T) "how much each token attend to each other"; high = relevant
     scores = (Q @ K.transpose(2, 1)) * self.head_size**-0.5
@@ -158,12 +158,13 @@ class Head:
     return scores @ V
 
   def params(self):
-    return [self.W_q, self.W_k, self.W_v]
+    return [self.W_q.weight, self.W_k.weight, self.W_v.weight]
 
 
 class Attention:
-  def __init__(self, C, n_heads):
-    self.heads = [Head(C, C // n_heads) for _ in range(n_heads)]
+  def __init__(self, sz):
+    _, _, C, NH, _ = sz
+    self.heads = [Head(sz) for _ in range(NH)]
     self.W_o = Tensor.uniform(C, C, requires_grad=True)
 
   def __call__(self, pe):
@@ -181,47 +182,36 @@ class Attention:
     return params
 
 
-class Block:
-  def __init__(self, sz):
-    _, _, C, NH, _ = sz
-    self.w = Tensor.uniform(C, C, requires_grad=True)  # size: (C,C)
-    self.b = Tensor.uniform(C, requires_grad=True)
-    self.attn = Attention(C, NH)
-
-  def __call__(self, x):
-    out = self.attn(x)
-    return (x + out @ self.w + self.b).gelu()
-
-  def params(self):
-    return [self.w, self.b] + self.attn.params()
-
-
 class Transformer:
   def __init__(self, sz):
-    _, _, _, _, VS = sz
+    _, _, C, _, VS = sz
     self.linear = nn.Linear(C, VS)
+    self.attn = Attention(sz)
     self.posenc = PositionalEncoding(sz)
 
   def __call__(self, xs, ys):
     pe = self.posenc(xs)
-    out = self.linear(pe)
+    out = self.linear(self.attn(pe)).tanh()
     ce = -out.log_softmax(axis=2).mul(ys).sum(axis=2).mean()
     return ce
 
   def generate(self, xs, temp=1.0):
     pe = self.posenc(xs)
-    out = self.linear(pe)
+    out = self.linear(self.attn(pe))
     return (out[0][-1].softmax() / temp).multinomial()
 
   def params(self):
-    # return [self.emb.weight, self.linear.weight, self.linear.bias]
-    return [self.posenc.emb.weight, self.linear.weight, self.linear.bias]
+    return [
+      self.posenc.emb.weight,
+      self.linear.weight,
+      self.linear.bias,
+    ] + self.attn.params()
 
 
 if __name__ == "__main__":
-  is_testing = True
+  is_testing = False
   text_size = 1000 if is_testing else 100000
-  steps = 200 if is_testing else 2000
+  steps = 20 if is_testing else 2000
 
   text = load_shakespeare()[:text_size]
   tokenizer = Tokenizer(text=text, iters=100)
