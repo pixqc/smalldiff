@@ -103,19 +103,18 @@ class Tokenizer:
 
 
 def prep_input(tokens, T):
-  trils = []
-  ys = []
-
-  # neat trick to right-pad inputs
-  for i in range(len(tokens) - T + 1):
-    tmp = np.tril(tokens[i : i + T])
-    trils.append(tmp)
-    tmp_y = tokens[i + 1 : i + T + 1]
-    ys.append(tmp_y)
-
-  xs = np.vstack(trils)[:-1]  # last one doesn't have a y
-  ys = np.concatenate(ys)
+  xs = np.array([tokens[i : i + T] for i in range(len(tokens) - T)])
+  ys = np.array([tokens[i + 1 : i + T + 1] for i in range(len(tokens) - T)])
   return xs, ys
+
+
+def sample_batch(xs, ys, sz):
+  B, T, _, _, VS = sz
+  idxs = np.random.choice(xs.shape[0], B, replace=False)
+  ys = ys[idxs]
+  one_hot = np.zeros((B, T, VS)).astype(np.uint32)
+  one_hot[np.arange(B)[:, None], np.arange(T), ys] = 1
+  return Tensor(xs[idxs]), Tensor(one_hot)
 
 
 class Head:
@@ -123,9 +122,9 @@ class Head:
     self.C = C
     self.head_size = head_size
 
-    self.W_q = Tensor.randn(C, head_size, requires_grad=True)
-    self.W_k = Tensor.randn(C, head_size, requires_grad=True)
-    self.W_v = Tensor.randn(C, head_size, requires_grad=True)
+    self.W_q = Tensor.uniform(C, head_size, requires_grad=True)
+    self.W_k = Tensor.uniform(C, head_size, requires_grad=True)
+    self.W_v = Tensor.uniform(C, head_size, requires_grad=True)
 
   def __call__(self, pe):
     Q = pe @ self.W_q
@@ -133,7 +132,7 @@ class Head:
     V = pe @ self.W_v
 
     # shape = (B, T, T) "how much each token attend to each other"; high = relevant
-    scores = Q @ K.transpose(2, 1) * self.head_size**-0.5
+    scores = (Q @ K.transpose(2, 1)) * self.head_size**-0.5
     # only pay attention to the prev tokens, not the future ones
     mask = Tensor.tril(Tensor.ones((pe.shape[1], pe.shape[1])))
     scores = Tensor.where(mask == 1, scores, -np.inf)
@@ -144,9 +143,10 @@ class Head:
 class Attention:
   def __init__(self, C, n_heads):
     self.heads = [Head(C, C // n_heads) for _ in range(n_heads)]
-    self.W_o = Tensor.randn(C, C, requires_grad=True)
+    self.W_o = Tensor.uniform(C, C, requires_grad=True)
 
   def __call__(self, pe):
+    # pe = pe.layernorm() + pe
     ho = [h(pe) for h in self.heads]
     c_ho = ho[0]  # might be a better way to do this
     for i in range(1, len(ho)):
@@ -157,17 +157,17 @@ class Attention:
 class Block:
   def __init__(self, sz):
     _, _, C, NH, _ = sz
-    self.w = Tensor.randn(C, C, requires_grad=True)  # size: (C,C)
-    self.b = Tensor.randn(C, requires_grad=True)
+    self.w = Tensor.uniform(C, C, requires_grad=True)  # size: (C,C)
+    self.b = Tensor.uniform(C, requires_grad=True)
     self.attn = Attention(C, NH)
 
   def __call__(self, x):
     out = self.attn(x)
-    return (x + out @ self.w + self.b).relu()
+    return (x + out @ self.w + self.b).gelu()
 
 
 if __name__ == "__main__":
-  text = load_shakespeare()[:100]
+  text = load_shakespeare()[:1000]
   tokenizer = Tokenizer(text=text, iters=100)
   tokens = tokenizer.encode(text)
 
@@ -176,9 +176,7 @@ if __name__ == "__main__":
   B, T, C, NH, VS = sz
 
   xs, ys = prep_input(tokens, T)
-  ys = np.eye(VS)[ys].astype(np.int32)
-  idxs = np.random.choice(xs.shape[0], B, replace=False)
-  xs, ys = Tensor(xs[idxs]), Tensor(ys[idxs])
+  xs, ys = sample_batch(xs, ys, sz)
 
   # positional encoding
   p = Tensor.arange(T)
@@ -189,12 +187,13 @@ if __name__ == "__main__":
   emb = nn.Embedding(VS, C)
   pe = emb(xs) + pe
 
-  blocks = [Block(sz) for _ in range(4)]
-
+  blocks = [Block(sz) for _ in range(1)]
   attn_out = pe
   for block in blocks:
     attn_out = block(attn_out)
 
-  out = (attn_out @ Tensor.randn(C, VS))[:, -1, :]
-  loss = -out.log_softmax(axis=1).mul(ys).sum(axis=1).mean()
+  proj_W = Tensor.uniform(C, VS)
+  proj_b = Tensor.uniform(VS)
+  out = attn_out @ proj_W + proj_b
+  loss = -out.log_softmax(axis=2).mul(ys).sum(axis=2).mean()
   print(loss.numpy())
