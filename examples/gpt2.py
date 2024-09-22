@@ -146,7 +146,7 @@ class Attention:
     self.W_o = Tensor.uniform(C, C, requires_grad=True)
 
   def __call__(self, pe):
-    # pe = pe.layernorm() + pe
+    pe = pe.layernorm() + pe
     ho = [h(pe) for h in self.heads]
     c_ho = ho[0]  # might be a better way to do this
     for i in range(1, len(ho)):
