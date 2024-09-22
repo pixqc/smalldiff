@@ -1,7 +1,6 @@
 # to run: ls examples/gpt2.py | entr -s 'PYTHONPATH="." python3 examples/gpt2.py'
 
 from collections import Counter
-from typing import List
 
 import numpy as np
 from tinygrad import nn
@@ -121,7 +120,7 @@ def sample_batch(xs, ys, sz):
 
 class PositionalEncoding:
   def __init__(self, sz):
-    _, T, C, _, VS = sz
+    B, T, C, _, VS = sz
     self.p = Tensor.arange(T)
     self.d = (Tensor.arange(0, C, 2) * -(Tensor(10000).log() / C)).exp()
     self.sin_p = (self.p * self.d).sin()
@@ -199,30 +198,24 @@ class Block:
 
 class Transformer:
   def __init__(self, sz):
-    _, _, C, _, VS = sz
-    self.token_emb = nn.Embedding(VS, C)
-    self.pos_enc = PositionalEncoding(sz)
-    self.blocks = [Block(sz) for _ in range(4)]
-    self.W_proj = Tensor.uniform(C, VS, requires_grad=True)
-    self.b_proj = Tensor.uniform(VS, requires_grad=True)
+    _, _, _, _, VS = sz
+    self.linear = nn.Linear(C, VS)
+    self.posenc = PositionalEncoding(sz)
 
   def __call__(self, xs, ys):
-    pe = self.pos_enc(xs)
-    for block in self.blocks:
-      pe = block(pe)
-    attn_out = pe @ self.W_proj + self.b_proj
-    logits = attn_out.softmax(axis=2)
-    return logits, -attn_out.log_softmax(axis=2).mul(ys).sum(axis=2).mean()
+    pe = self.posenc(xs)
+    out = self.linear(pe)
+    ce = -out.log_softmax(axis=2).mul(ys).sum(axis=2).mean()
+    return ce
 
-  def generate(self, input):
-    out = self.token_emb(input)  # assuming B is 1
-    return out[0][-1].argmax()
+  def generate(self, xs, temp=1.0):
+    pe = self.posenc(xs)
+    out = self.linear(pe)
+    return (out[0][-1].softmax() / temp).multinomial()
 
-  def params(self) -> List[Tensor]:
-    ps = [self.token_emb.weight] + self.pos_enc.params() + [self.W_proj, self.b_proj]
-    for block in self.blocks:
-      ps.extend(block.params())
-    return ps
+  def params(self):
+    # return [self.emb.weight, self.linear.weight, self.linear.bias]
+    return [self.posenc.emb.weight, self.linear.weight, self.linear.bias]
 
 
 if __name__ == "__main__":
@@ -234,29 +227,30 @@ if __name__ == "__main__":
   tokenizer = Tokenizer(text=text, iters=100)
   tokens = tokenizer.encode(text)
 
-  # block size, seq len, embedding size, num heads, vocab size
-  sz = (64, 16, 32, 4, len(tokenizer.vocab))
-  B, T, C, NH, VS = sz
+  B, T, C, NH, VS = 64, 16, 32, 4, len(tokenizer.vocab)
+  sz = (B, T, C, NH, VS)
 
   xs, ys = prep_input(tokens, T)
   xs, ys = sample_batch(xs, ys, sz)
 
   model = Transformer(sz)
-  optimizer = AdamW(model.params(), lr=1e-3)
+  optimizer = AdamW(model.params(), lr=1e-4)
   with Tensor.train():
     for step in tqdm(range(steps), desc="training gpt2", unit="step"):
-      logits, loss = model(xs, ys)
+      loss = model(xs, ys)
       loss.backward()
       optimizer.step()
 
       if step % 100 == 0:
         print(f"step {step}: loss {loss.numpy():.2f}")
 
+  pad_right = lambda xs: xs + [0] * (T - len(xs))
   input = tokenizer.encode("With the")
   print(tokenizer.decode(input), end="")
   for i in range(100):
-    tok = model.generate(Tensor(input)).item()
-    assert isinstance(tok, int)
+    input = pad_right(input)
+    tok = model.generate(Tensor(pad_right(input))).item()
     print(tokenizer.decode([tok]), end="")
+    input = input[: min(len(input), T)]
     input.append(tok)
     input = input[-T:]
