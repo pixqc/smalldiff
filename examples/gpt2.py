@@ -197,22 +197,32 @@ class Block:
     return [self.w, self.b] + self.attn.params()
 
 
-class Bigram:
+class Transformer:
   def __init__(self, sz):
-    _, _, _, _, VS = sz
-    self.emb = nn.Embedding(VS, VS)
+    _, _, C, _, VS = sz
+    self.token_emb = nn.Embedding(VS, C)
+    self.pos_enc = PositionalEncoding(sz)
+    self.blocks = [Block(sz) for _ in range(4)]
+    self.W_proj = Tensor.uniform(C, VS, requires_grad=True)
+    self.b_proj = Tensor.uniform(VS, requires_grad=True)
 
   def __call__(self, xs, ys):
-    logits = self.emb(xs)
-    ce = -logits.log_softmax(axis=2).mul(ys).sum(axis=2).mean()  # logits is attn_out
-    return logits, ce
+    pe = self.pos_enc(xs)
+    for block in self.blocks:
+      pe = block(pe)
+    attn_out = pe @ self.W_proj + self.b_proj
+    logits = attn_out.softmax(axis=2)
+    return logits, -attn_out.log_softmax(axis=2).mul(ys).sum(axis=2).mean()
 
   def generate(self, input):
-    out = self.emb(input)  # assuming B is 1
+    out = self.token_emb(input)  # assuming B is 1
     return out[0][-1].argmax()
 
   def params(self) -> List[Tensor]:
-    return [self.emb.weight]
+    ps = [self.token_emb.weight] + self.pos_enc.params() + [self.W_proj, self.b_proj]
+    for block in self.blocks:
+      ps.extend(block.params())
+    return ps
 
 
 if __name__ == "__main__":
@@ -231,25 +241,7 @@ if __name__ == "__main__":
   xs, ys = prep_input(tokens, T)
   xs, ys = sample_batch(xs, ys, sz)
 
-  # NOTE: note used for now
-  # attn
-  pos_enc = PositionalEncoding(sz)
-  pe = pos_enc(xs)
-  blocks = [Block(sz) for _ in range(4)]
-  for block in blocks:
-    pe = block(pe)
-
-  # project it back to vocab size
-  W_proj = Tensor.uniform(C, VS, requires_grad=True)
-  b_proj = Tensor.uniform(VS, requires_grad=True)
-  attn_out = pe @ W_proj + b_proj
-
-  model = Bigram(sz)
-  all_params = model.params() + pos_enc.params() + [W_proj, b_proj]
-  for block in blocks:
-    all_params.extend(block.params())
-  # end of not used for now
-
+  model = Transformer(sz)
   optimizer = AdamW(model.params(), lr=1e-3)
   with Tensor.train():
     for step in tqdm(range(steps), desc="training gpt2", unit="step"):
