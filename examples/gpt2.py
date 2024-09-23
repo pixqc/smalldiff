@@ -205,11 +205,7 @@ class Transformer:
 
 
 if __name__ == "__main__":
-  is_testing = False
-  text_size = 1000 if is_testing else 100000
-  steps = 35 if is_testing else 2000
-
-  text = load_shakespeare()[:text_size]
+  text = load_shakespeare()
   tokenizer = Tokenizer(text=text, iters=100)
   tokens = tokenizer.encode(text)
 
@@ -220,9 +216,9 @@ if __name__ == "__main__":
   xs, ys = sample_batch(xs, ys, sz)
 
   model = Transformer(sz)
-  optimizer = AdamW(model.params(), lr=1e-3)
+  optimizer = AdamW(model.params(), lr=1e-4)
   with Tensor.train():
-    for step in tqdm(range(steps), desc="training gpt2", unit="step"):
+    for step in tqdm(range(5000), desc="training gpt2", unit="step"):
       loss = model.loss(xs, ys)
       loss.backward()
       optimizer.step()
