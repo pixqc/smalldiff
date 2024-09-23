@@ -135,69 +135,65 @@ class PositionalEncoding:
     return [self.emb.weight]
 
 
-class Head:
+class MultiHeadAttention:
   def __init__(self, sz):
     _, _, C, NH, _ = sz
+    self.NH = NH
     self.head_size = C // NH
 
-    self.W_q = nn.Linear(C, self.head_size, bias=False)
-    self.W_k = nn.Linear(C, self.head_size, bias=False)
-    self.W_v = nn.Linear(C, self.head_size, bias=False)
+    self.W_q = nn.Linear(C, C, bias=False)
+    self.W_k = nn.Linear(C, C, bias=False)
+    self.W_v = nn.Linear(C, C, bias=False)
+    self.W_o = nn.Linear(C, C, bias=False)
 
   def __call__(self, pe):
+    B, T, C = pe.shape
+    pe_norm = pe.layernorm()
+    pe = pe + pe_norm
     Q = self.W_q(pe)
     K = self.W_k(pe)
     V = self.W_v(pe)
+    Q = Q.reshape(B, T, self.NH, self.head_size).transpose(1, 2)
+    K = K.reshape(B, T, self.NH, self.head_size).transpose(1, 2)
+    V = V.reshape(B, T, self.NH, self.head_size).transpose(1, 2)
 
     # shape = (B, T, T) "how much each token attend to each other"; high = relevant
-    scores = (Q @ K.transpose(2, 1)) * self.head_size**-0.5
+    scores = (Q @ K.transpose(-2, -1)) * (self.head_size**-0.5)
     # only pay attention to the prev tokens, not the future ones
-    mask = Tensor.tril(Tensor.ones((pe.shape[1], pe.shape[1])))
-    scores = Tensor.where(mask == 1, scores, -np.inf)
-    scores = scores.softmax()
-    return scores @ V
+    mask = Tensor.tril(Tensor.ones((T, T)))
+    scores = Tensor.where(mask == 1, scores, float("-inf"))
+    scores = scores.softmax(axis=-1)
+    attn_output = scores @ V
+    attn_output = attn_output.transpose(1, 2).reshape(B, T, C)
+    out = self.W_o(attn_output)
+    return out
 
   def params(self):
-    return [self.W_q.weight, self.W_k.weight, self.W_v.weight]
-
-
-class Attention:
-  def __init__(self, sz):
-    _, _, C, NH, _ = sz
-    self.heads = [Head(sz) for _ in range(NH)]
-    self.W_o = Tensor.uniform(C, C, requires_grad=True)
-
-  def __call__(self, pe):
-    pe = pe.layernorm() + pe
-    ho = [h(pe) for h in self.heads]
-    c_ho = ho[0]  # might be a better way to do this
-    for i in range(1, len(ho)):
-      c_ho = c_ho.cat(ho[i], dim=-1)
-    return c_ho @ self.W_o
-
-  def params(self):
-    params = [self.W_o]
-    for head in self.heads:
-      params.extend(head.params())
-    return params
+    return [
+      self.W_q.weight,
+      self.W_k.weight,
+      self.W_v.weight,
+      self.W_o.weight,
+    ]
 
 
 class Transformer:
   def __init__(self, sz):
     _, _, C, _, VS = sz
     self.linear = nn.Linear(C, VS)
-    self.attn = Attention(sz)
+    self.attn = MultiHeadAttention(sz)
     self.posenc = PositionalEncoding(sz)
 
-  def __call__(self, xs, ys):
+  def __call__(self, xs):
     pe = self.posenc(xs)
-    out = self.linear(self.attn(pe)).tanh()
-    ce = -out.log_softmax(axis=2).mul(ys).sum(axis=2).mean()
-    return ce
+    return self.linear(self.attn(pe)).tanh()
+
+  def loss(self, xs, ys):
+    out = self(xs)
+    return -out.log_softmax(axis=2).mul(ys).sum(axis=2).mean()
 
   def generate(self, xs, temp=1.0):
-    pe = self.posenc(xs)
-    out = self.linear(self.attn(pe))
+    out = self(xs)
     return (out[0][-1].softmax() / temp).multinomial()
 
   def params(self):
@@ -211,7 +207,7 @@ class Transformer:
 if __name__ == "__main__":
   is_testing = False
   text_size = 1000 if is_testing else 100000
-  steps = 20 if is_testing else 2000
+  steps = 35 if is_testing else 2000
 
   text = load_shakespeare()[:text_size]
   tokenizer = Tokenizer(text=text, iters=100)
@@ -224,10 +220,10 @@ if __name__ == "__main__":
   xs, ys = sample_batch(xs, ys, sz)
 
   model = Transformer(sz)
-  optimizer = AdamW(model.params(), lr=1e-4)
+  optimizer = AdamW(model.params(), lr=1e-3)
   with Tensor.train():
     for step in tqdm(range(steps), desc="training gpt2", unit="step"):
-      loss = model(xs, ys)
+      loss = model.loss(xs, ys)
       loss.backward()
       optimizer.step()
 
