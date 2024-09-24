@@ -110,7 +110,7 @@ def prep_input(tokens, T):
 
 
 def sample_batch(xs, ys, sz):
-  B, T, _, _, VS = sz
+  B, T, _, _, _, VS = sz
   idxs = np.random.choice(xs.shape[0], B, replace=False)
   ys = ys[idxs]
   one_hot = np.zeros((B, T, VS)).astype(np.uint32)
@@ -118,70 +118,70 @@ def sample_batch(xs, ys, sz):
   return Tensor(xs[idxs]), Tensor(one_hot)
 
 
+# TODO: https://arxiv.org/abs/2104.09864
 class PositionalEncoding:
   def __init__(self, sz):
-    B, T, C, _, VS = sz
-    self.p = Tensor.arange(T)
-    self.d = (Tensor.arange(0, C, 2) * -(Tensor(10000).log() / C)).exp()
-    self.sin_p = (self.p * self.d).sin()
-    self.cos_p = (self.p * self.d).cos()
+    B, T, C, _, _, VS = sz
+    # self.p = Tensor.arange(T)
+    # self.d = (Tensor.arange(0, C, 2) * -(Tensor(10000).log() / C)).exp()
+    # self.sin_p = (self.p * self.d).sin()
+    # self.cos_p = (self.p * self.d).cos()
     self.emb = nn.Embedding(VS, C)
-    self.aa = B // 4  # idk what to name this, TODO
+    # self.aa = B // 4  # idk what to name this, TODO
 
   def __call__(self, xs):
-    return self.emb(xs) + self.sin_p.stack(self.cos_p).repeat(self.aa, 1).T
+    # return self.emb(xs) + self.sin_p.stack(self.cos_p).repeat(self.aa, 1).T
+    return self.emb(xs)
 
   def params(self):
     return [self.emb.weight]
 
 
-class MultiHeadAttention:
+class Attention:
   def __init__(self, sz):
-    _, _, C, NH, _ = sz
-    self.NH = NH
-    self.head_size = C // NH
-
-    self.W_q = nn.Linear(C, C, bias=False)
-    self.W_k = nn.Linear(C, C, bias=False)
-    self.W_v = nn.Linear(C, C, bias=False)
-    self.W_o = nn.Linear(C, C, bias=False)
+    self.B, self.T, self.C, self.NH, self.HSZ, self.VS = sz
+    self.W_q = Tensor.uniform(self.C, self.C, requires_grad=True)
+    self.W_k = Tensor.uniform(self.C, self.C, requires_grad=True)
+    self.W_v = Tensor.uniform(self.C, self.C, requires_grad=True)
+    self.W_o = Tensor.uniform(self.C, self.C, requires_grad=True)
 
   def __call__(self, pe):
     B, T, C = pe.shape
+    # this layernorm and residual connection correct?
     pe_norm = pe.layernorm()
     pe = pe + pe_norm
-    Q = self.W_q(pe)
-    K = self.W_k(pe)
-    V = self.W_v(pe)
-    Q = Q.reshape(B, T, self.NH, self.head_size).transpose(1, 2)
-    K = K.reshape(B, T, self.NH, self.head_size).transpose(1, 2)
-    V = V.reshape(B, T, self.NH, self.head_size).transpose(1, 2)
+    Q = (pe @ self.W_q).reshape(B, T, NH, HSZ).transpose(1, 2)
+    K = (pe @ self.W_k).reshape(B, T, NH, HSZ).transpose(1, 2)
+    V = (pe @ self.W_v).reshape(B, T, NH, HSZ).transpose(1, 2)
+    Q = Q.reshape(B * NH, T, HSZ)
+    K = K.reshape(B * NH, T, HSZ)
 
-    # shape = (B, T, T) "how much each token attend to each other"; high = relevant
-    scores = (Q @ K.transpose(-2, -1)) * (self.head_size**-0.5)
+    # "how much each token attend to each other"; high = relevant
+    scores = Q @ K.transpose(2, 1) * (HSZ**-0.5)
     # only pay attention to the prev tokens, not the future ones
     mask = Tensor.tril(Tensor.ones((T, T)))
     scores = Tensor.where(mask == 1, scores, float("-inf"))
+    scores = scores.reshape(B, NH, T, T)
     scores = scores.softmax(axis=-1)
     attn_output = scores @ V
     attn_output = attn_output.transpose(1, 2).reshape(B, T, C)
-    out = self.W_o(attn_output)
+    out = attn_output @ self.W_o
     return out
 
   def params(self):
     return [
-      self.W_q.weight,
-      self.W_k.weight,
-      self.W_v.weight,
-      self.W_o.weight,
+      self.W_q,
+      self.W_k,
+      self.W_v,
+      self.W_o,
     ]
 
 
 class Transformer:
   def __init__(self, sz):
-    _, _, C, _, VS = sz
+    _, _, C, _, _, VS = sz
     self.linear = nn.Linear(C, VS)
-    self.attn = MultiHeadAttention(sz)
+    self.attn = Attention(sz)
     self.posenc = PositionalEncoding(sz)
 
   def __call__(self, xs):
@@ -206,11 +206,11 @@ class Transformer:
 
 if __name__ == "__main__":
   text = load_shakespeare()
-  tokenizer = Tokenizer(text=text, iters=100)
+  tokenizer = Tokenizer(text=text, iters=500)
   tokens = tokenizer.encode(text)
 
-  B, T, C, NH, VS = 64, 16, 32, 4, len(tokenizer.vocab)
-  sz = (B, T, C, NH, VS)
+  B, T, C, NH, HSZ, VS = 64, 16, 32, 4, 32 // 4, len(tokenizer.vocab)
+  sz = (B, T, C, NH, HSZ, VS)
 
   xs, ys = prep_input(tokens, T)
   xs, ys = sample_batch(xs, ys, sz)
