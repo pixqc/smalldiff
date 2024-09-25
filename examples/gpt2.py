@@ -9,6 +9,8 @@ from tinygrad.tensor import Tensor
 
 from helpers import load_shakespeare, tqdm
 
+# -- input processing --
+
 
 class Tokenizer:
   def __init__(self, text, iters=10):
@@ -118,19 +120,21 @@ def sample_batch(xs, ys, sz):
   return Tensor(xs[idxs]), Tensor(one_hot)
 
 
+## -- neural nets --
+
+
 # TODO: https://arxiv.org/abs/2104.09864
 class PositionalEncoding:
   def __init__(self, sz):
-    B, T, C, _, _, VS = sz
-    self.p = Tensor.arange(T)
-    self.d = (Tensor.arange(0, C, 2) * -(Tensor(10000).log() / C)).exp()
-    self.sin_p = (self.p * self.d).sin()
-    self.cos_p = (self.p * self.d).cos()
+    _, T, C, _, _, VS = sz
+    p = Tensor.arange(T)
+    d = (Tensor.arange(0, C, 2) * -(Tensor(10000).log() / C)).exp()
+    pd = p * d
+    self.posenc = pd.sin().stack(pd.cos()).repeat(C // 2, 1).T
     self.emb = nn.Embedding(VS, C)
-    self.aa = B // 4  # idk what to name this, TODO
 
   def __call__(self, xs):
-    return self.emb(xs) + self.sin_p.stack(self.cos_p).repeat(self.aa, 1).T
+    return self.emb(xs) + self.posenc
 
   def params(self):
     return [self.emb.weight]
