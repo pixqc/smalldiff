@@ -122,16 +122,15 @@ def sample_batch(xs, ys, sz):
 class PositionalEncoding:
   def __init__(self, sz):
     B, T, C, _, _, VS = sz
-    # self.p = Tensor.arange(T)
-    # self.d = (Tensor.arange(0, C, 2) * -(Tensor(10000).log() / C)).exp()
-    # self.sin_p = (self.p * self.d).sin()
-    # self.cos_p = (self.p * self.d).cos()
+    self.p = Tensor.arange(T)
+    self.d = (Tensor.arange(0, C, 2) * -(Tensor(10000).log() / C)).exp()
+    self.sin_p = (self.p * self.d).sin()
+    self.cos_p = (self.p * self.d).cos()
     self.emb = nn.Embedding(VS, C)
-    # self.aa = B // 4  # idk what to name this, TODO
+    self.aa = B // 4  # idk what to name this, TODO
 
   def __call__(self, xs):
-    # return self.emb(xs) + self.sin_p.stack(self.cos_p).repeat(self.aa, 1).T
-    return self.emb(xs)
+    return self.emb(xs) + self.sin_p.stack(self.cos_p).repeat(self.aa, 1).T
 
   def params(self):
     return [self.emb.weight]
@@ -140,24 +139,25 @@ class PositionalEncoding:
 class Attention:
   def __init__(self, sz):
     self.B, self.T, self.C, self.NH, self.HSZ, self.VS = sz
-    self.W_q = Tensor.uniform(self.C, self.C, requires_grad=True)
-    self.W_k = Tensor.uniform(self.C, self.C, requires_grad=True)
-    self.W_v = Tensor.uniform(self.C, self.C, requires_grad=True)
-    self.W_o = Tensor.uniform(self.C, self.C, requires_grad=True)
+    self.W_q = nn.Linear(C, C, bias=False)
+    self.W_k = nn.Linear(C, C, bias=False)
+    self.W_v = nn.Linear(C, C, bias=False)
+    self.W_o = nn.Linear(C, C, bias=False)
 
   def __call__(self, pe):
     B, T, C = pe.shape
     # this layernorm and residual connection correct?
     pe_norm = pe.layernorm()
     pe = pe + pe_norm
-    Q = (pe @ self.W_q).reshape(B, T, NH, HSZ).transpose(1, 2)
-    K = (pe @ self.W_k).reshape(B, T, NH, HSZ).transpose(1, 2)
-    V = (pe @ self.W_v).reshape(B, T, NH, HSZ).transpose(1, 2)
+
+    Q = self.W_q(pe).reshape(B, T, NH, HSZ).transpose(1, 2)
+    K = self.W_k(pe).reshape(B, T, NH, HSZ).transpose(1, 2)
+    V = self.W_v(pe).reshape(B, T, NH, HSZ).transpose(1, 2)
     Q = Q.reshape(B * NH, T, HSZ)
     K = K.reshape(B * NH, T, HSZ)
 
     # "how much each token attend to each other"; high = relevant
-    scores = Q @ K.transpose(2, 1) * (HSZ**-0.5)
+    scores = (Q @ K.transpose(2, 1)) * (HSZ**-0.5)
     # only pay attention to the prev tokens, not the future ones
     mask = Tensor.tril(Tensor.ones((T, T)))
     scores = Tensor.where(mask == 1, scores, float("-inf"))
@@ -165,15 +165,14 @@ class Attention:
     scores = scores.softmax(axis=-1)
     attn_output = scores @ V
     attn_output = attn_output.transpose(1, 2).reshape(B, T, C)
-    out = attn_output @ self.W_o
-    return out
+    return self.W_o(attn_output)
 
   def params(self):
     return [
-      self.W_q,
-      self.W_k,
-      self.W_v,
-      self.W_o,
+      self.W_q.weight,
+      self.W_k.weight,
+      self.W_v.weight,
+      self.W_o.weight,
     ]
 
 
@@ -205,7 +204,7 @@ class Transformer:
 
 
 if __name__ == "__main__":
-  text = load_shakespeare()
+  text = load_shakespeare()[:1000]
   tokenizer = Tokenizer(text=text, iters=500)
   tokens = tokenizer.encode(text)
 
