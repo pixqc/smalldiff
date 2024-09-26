@@ -1,13 +1,14 @@
+# inspired by https://github.com/xjdr-alt/simple_transformer
 # to run: ls examples/gpt2.py | entr -s 'PYTHONPATH="." python3 examples/gpt2.py'
 
 from collections import Counter
+from typing import List, NamedTuple
 
 import numpy as np
-from tinygrad import nn
-from tinygrad.nn.optim import AdamW
+import tinygrad.nn as nn
 from tinygrad.tensor import Tensor
 
-from helpers import load_shakespeare, tqdm
+from helpers import load_shakespeare
 
 # -- input processing --
 
@@ -105,137 +106,96 @@ class Tokenizer:
     return self.to_text(byte_list)
 
 
-def prep_input(tokens, T):
-  xs = np.array([tokens[i : i + T] for i in range(len(tokens) - T)])
-  ys = np.array([tokens[i + 1 : i + T + 1] for i in range(len(tokens) - T)])
-  return xs, ys
-
-
-def sample_batch(xs, ys, sz):
-  B, T, _, _, _, VS = sz
-  idxs = np.random.choice(xs.shape[0], B, replace=False)
-  ys = ys[idxs]
-  one_hot = np.zeros((B, T, VS)).astype(np.uint32)
-  one_hot[np.arange(B)[:, None], np.arange(T), ys] = 1
-  return Tensor(xs[idxs]), Tensor(one_hot)
-
-
 ## -- neural nets --
 
 
-# TODO: https://arxiv.org/abs/2104.09864
-class PositionalEncoding:
-  def __init__(self, sz):
-    _, T, C, _, _, VS = sz
-    p = Tensor.arange(T)
-    d = (Tensor.arange(0, C, 2) * -(Tensor(10000).log() / C)).exp()
-    pd = p * d
-    self.posenc = pd.sin().stack(pd.cos()).repeat(C // 2, 1).T
-    self.emb = nn.Embedding(VS, C)
-
-  def __call__(self, xs):
-    return self.emb(xs) + self.posenc
-
-  def params(self):
-    return [self.emb.weight]
+class LayerParams(NamedTuple):
+  w_q_dhk: Tensor
+  w_k_dhk: Tensor
+  w_v_dhk: Tensor
+  w_o_hkd: Tensor
+  w_ffw_dd: Tensor
 
 
-class Attention:
-  def __init__(self, sz):
-    self.B, self.T, self.C, self.NH, self.HSZ, self.VS = sz
-    self.W_q = nn.Linear(C, C, bias=False)
-    self.W_k = nn.Linear(C, C, bias=False)
-    self.W_v = nn.Linear(C, C, bias=False)
-    self.W_o = nn.Linear(C, C, bias=False)
-
-  def __call__(self, pe):
-    B, T, C = pe.shape
-    # this layernorm and residual connection correct?
-    pe_norm = pe.layernorm()
-    pe = pe + pe_norm
-
-    Q = self.W_q(pe).reshape(B, T, NH, HSZ).transpose(1, 2)
-    K = self.W_k(pe).reshape(B, T, NH, HSZ).transpose(1, 2)
-    V = self.W_v(pe).reshape(B, T, NH, HSZ).transpose(1, 2)
-    Q = Q.reshape(B * NH, T, HSZ)
-    K = K.reshape(B * NH, T, HSZ)
-
-    # "how much each token attend to each other"; high = relevant
-    scores = (Q @ K.transpose(2, 1)) * (HSZ**-0.5)
-    # only pay attention to the prev tokens, not the future ones
-    mask = Tensor.tril(Tensor.ones((T, T)))
-    scores = Tensor.where(mask == 1, scores, float("-inf"))
-    scores = scores.reshape(B, NH, T, T)
-    scores = scores.softmax(axis=-1)
-    attn_output = scores @ V
-    attn_output = attn_output.transpose(1, 2).reshape(B, T, C)
-    return self.W_o(attn_output)
-
-  def params(self):
-    return [
-      self.W_q.weight,
-      self.W_k.weight,
-      self.W_v.weight,
-      self.W_o.weight,
-    ]
+class TransformerParams(NamedTuple):
+  layer_params: List[LayerParams]
+  emb_vd: nn.Embedding
+  w_dk: Tensor
+  b_d: Tensor
 
 
-class Transformer:
-  def __init__(self, sz):
-    _, _, C, _, _, VS = sz
-    self.linear = nn.Linear(C, VS)
-    self.attn = Attention(sz)
-    self.posenc = PositionalEncoding(sz)
+class Size(NamedTuple):
+  B: int  # batch size
+  L: int  # sequence length
+  D: int  # model dimension
+  H: int  # number of attention heads in a layer
+  K: int  # size of each attention key or value
+  V: int  # vocab size
 
-  def __call__(self, xs):
-    pe = self.posenc(xs)
-    return self.linear(self.attn(pe)).tanh()
 
-  def loss(self, xs, ys):
-    out = self(xs)
-    return -out.log_softmax(axis=2).mul(ys).sum(axis=2).mean()
+def prep_input(tokens, sz: Size):
+  xs = np.array([tokens[i : i + sz.L] for i in range(len(tokens) - sz.L)])
+  ys = np.array([tokens[i + 1 : i + sz.L + 1] for i in range(len(tokens) - sz.L)])
+  return xs, ys
 
-  def generate(self, xs, temp=1.0):
-    out = self(xs)
-    return (out[0][-1].softmax() / temp).multinomial()
 
-  def params(self):
-    return [
-      self.posenc.emb.weight,
-      self.linear.weight,
-      self.linear.bias,
-    ] + self.attn.params()
+def sample_batch(xs, ys, sz: Size):
+  idxs = np.random.choice(xs.shape[0], sz.B, replace=False)
+  ys = ys[idxs]
+  one_hot = np.zeros((sz.B, sz.L, sz.V)).astype(np.uint32)
+  one_hot[np.arange(sz.B)[:, None], np.arange(sz.L), ys] = 1
+  return Tensor(xs[idxs]), Tensor(one_hot)
+
+
+def get_pe(sz: Size):
+  p = Tensor.arange(sz.L)
+  d = (Tensor.arange(0, sz.D, 2) * -(Tensor(10000).log() / sz.D)).exp()
+  pd = p * d
+  return pd.sin().stack(pd.cos()).repeat(sz.D // 2, 1).T
+
+
+def attention(input_bld: Tensor, params: LayerParams, sz: Size):
+  q_blhk = Tensor.einsum("bld,dhk->blhk", input_bld, params.w_q_dhk)
+  k_blhk = Tensor.einsum("bld,dhk->blhk", input_bld, params.w_k_dhk)
+  v_blhk = Tensor.einsum("bld,dhk->blhk", input_bld, params.w_v_dhk)
+  scores_bhll = Tensor.einsum("bihk,bjhk->bhij", q_blhk, k_blhk)
+  mask = Tensor.where(Tensor.tril(Tensor.ones((sz.L, sz.L))) == 1, 0.0, -np.inf)
+  scores_bhll = ((scores_bhll + mask) * sz.K**-0.5).softmax(axis=-1)
+  out_blhk = Tensor.einsum("bhij,bjhk->bihk", scores_bhll, v_blhk)
+  out_bld = Tensor.einsum("blhk,hkd->bld", out_blhk, params.w_o_hkd)
+  return out_bld
+
+
+def transformer(xs: Tensor, params: TransformerParams, sz: Size):
+  pe = get_pe(sz)
+  input_bld = params.emb_vd(xs) + pe
+  for layer_params in params.layer_params:
+    input_bld += attention(input_bld, layer_params, sz)
+    input_bld += input_bld @ layer_params.w_ffw_dd
+  return input_bld @ params.w_dk + params.b_d
 
 
 if __name__ == "__main__":
   text = load_shakespeare()[:1000]
   tokenizer = Tokenizer(text=text, iters=500)
   tokens = tokenizer.encode(text)
+  sz = Size(64, 16, 32, 4, 32 // 4, len(tokenizer.vocab))
+  xs, ys = prep_input(tokens, sz)
+  xs, ys = sample_batch(xs, ys, sz)  # (B, L) (B, L, V)
 
-  B, T, C, NH, HSZ, VS = 64, 16, 32, 4, 32 // 4, len(tokenizer.vocab)
-  sz = (B, T, C, NH, HSZ, VS)
+  l_params = LayerParams(
+    Tensor.uniform(sz.D, sz.H, sz.K),
+    Tensor.uniform(sz.D, sz.H, sz.K),
+    Tensor.uniform(sz.D, sz.H, sz.K),
+    Tensor.uniform(sz.H, sz.K, sz.D),
+    Tensor.uniform(sz.D, sz.D),
+  )
+  t_params = TransformerParams(
+    [l_params],
+    nn.Embedding(sz.V, sz.D),
+    Tensor.uniform(sz.D, sz.V),
+    Tensor.zeros(sz.V),
+  )
 
-  xs, ys = prep_input(tokens, T)
-  xs, ys = sample_batch(xs, ys, sz)
-
-  model = Transformer(sz)
-  optimizer = AdamW(model.params(), lr=1e-4)
-  with Tensor.train():
-    for step in tqdm(range(5000), desc="training gpt2", unit="step"):
-      loss = model.loss(xs, ys)
-      loss.backward()
-      optimizer.step()
-
-      if step % 100 == 0:
-        print(f"step {step}: loss {loss.numpy():.2f}")
-
-  pad_right = lambda xs: xs + [0] * (T - len(xs))
-  input = tokenizer.encode("With the")
-  print(tokenizer.decode(input), end="")
-  for i in range(100):
-    input = pad_right(input)
-    tok = model.generate(Tensor(pad_right(input))).item()
-    print(tokenizer.decode([tok]), end="")
-    input = input[: min(len(input), T)]
-    input.append(tok)
-    input = input[-T:]
+  out_bld = transformer(xs, t_params, sz)
+  print(out_bld)
