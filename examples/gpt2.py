@@ -6,9 +6,10 @@ from typing import List, NamedTuple
 
 import numpy as np
 import tinygrad.nn as nn
+from tinygrad.nn.optim import AdamW
 from tinygrad.tensor import Tensor
 
-from helpers import load_shakespeare
+from helpers import load_shakespeare, tqdm
 
 # -- input processing --
 
@@ -114,7 +115,10 @@ class LayerParams(NamedTuple):
   w_k_dhk: Tensor
   w_v_dhk: Tensor
   w_o_hkd: Tensor
-  w_ffw_dd: Tensor
+  w_ff1_dh: Tensor
+  w_ff2_hd: Tensor
+  b_ff1_h: Tensor
+  b_ff2_d: Tensor
 
 
 class TransformerParams(NamedTuple):
@@ -154,6 +158,11 @@ def get_pe(sz: Size):
   return pd.sin().stack(pd.cos()).repeat(sz.D // 2, 1).T
 
 
+def norm(x, eps=1e-5):
+  kwargs = {"axis": -1, "keepdim": True}
+  return (x - x.mean(**kwargs)) / (x.std(**kwargs) + eps)
+
+
 def attention(input_bld: Tensor, params: LayerParams, sz: Size):
   q_blhk = Tensor.einsum("bld,dhk->blhk", input_bld, params.w_q_dhk)
   k_blhk = Tensor.einsum("bld,dhk->blhk", input_bld, params.w_k_dhk)
@@ -166,17 +175,46 @@ def attention(input_bld: Tensor, params: LayerParams, sz: Size):
   return out_bld
 
 
+def ffw(input_bld: Tensor, params: LayerParams):
+  return (
+    input_bld @ params.w_ff1_dh + params.b_ff1_h
+  ).gelu() @ params.w_ff2_hd + params.b_ff2_d
+
+
 def transformer(xs: Tensor, params: TransformerParams, sz: Size):
   pe = get_pe(sz)
   input_bld = params.emb_vd(xs) + pe
   for layer_params in params.layer_params:
-    input_bld += attention(input_bld, layer_params, sz)
-    input_bld += input_bld @ layer_params.w_ffw_dd
+    input_bld = input_bld + attention(norm(input_bld), layer_params, sz)
+    input_bld = input_bld + ffw(norm(input_bld), layer_params)
   return input_bld @ params.w_dk + params.b_d
 
 
+def loss(y_pred, ys):
+  return -y_pred.log_softmax(axis=2).mul(ys).sum(axis=2).mean()
+
+
+def params(params: TransformerParams):
+  layer_attrs = [
+    "w_q_dhk",
+    "w_k_dhk",
+    "w_v_dhk",
+    "w_o_hkd",
+    "w_ff1_dh",
+    "b_ff1_h",
+    "w_ff2_hd",
+    "b_ff2_d",
+  ]
+  transformer_attrs = ["w_dk", "b_d"]
+  return (
+    [getattr(layer, attr) for layer in params.layer_params for attr in layer_attrs]
+    + [getattr(params, attr) for attr in transformer_attrs]
+    + [params.emb_vd.weight]
+  )
+
+
 if __name__ == "__main__":
-  text = load_shakespeare()[:1000]
+  text = load_shakespeare()[:100000]
   tokenizer = Tokenizer(text=text, iters=500)
   tokens = tokenizer.encode(text)
   sz = Size(64, 16, 32, 4, 32 // 4, len(tokenizer.vocab))
@@ -188,7 +226,10 @@ if __name__ == "__main__":
     Tensor.uniform(sz.D, sz.H, sz.K),
     Tensor.uniform(sz.D, sz.H, sz.K),
     Tensor.uniform(sz.H, sz.K, sz.D),
-    Tensor.uniform(sz.D, sz.D),
+    Tensor.uniform(sz.D, sz.H),
+    Tensor.uniform(sz.H, sz.D),
+    Tensor.zeros(sz.H),
+    Tensor.zeros(sz.D),
   )
   t_params = TransformerParams(
     [l_params],
@@ -197,5 +238,14 @@ if __name__ == "__main__":
     Tensor.zeros(sz.V),
   )
 
-  out_bld = transformer(xs, t_params, sz)
-  print(out_bld)
+  optimizer = AdamW(params(t_params), lr=1e-3)
+  with Tensor.train():
+    for step in tqdm(range(5000), desc="training gpt2", unit="step"):
+      optimizer.zero_grad()
+      out_bld = transformer(xs, t_params, sz)
+      loss_val = loss(out_bld, ys)
+      loss_val.backward()
+      optimizer.step()
+
+      if step % 100 == 0:
+        print(f"step {step}: loss={loss_val.numpy():.2f}")
