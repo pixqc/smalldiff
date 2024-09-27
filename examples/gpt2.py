@@ -2,6 +2,7 @@
 # to run: ls examples/gpt2.py | entr -s 'PYTHONPATH="." python3 examples/gpt2.py'
 
 from collections import Counter
+from dataclasses import dataclass
 from typing import List, NamedTuple
 
 import numpy as np
@@ -128,7 +129,8 @@ class TransformerParams(NamedTuple):
   b_d: Tensor
 
 
-class Size(NamedTuple):
+@dataclass(frozen=True)
+class Size:
   B: int  # batch size
   L: int  # sequence length
   D: int  # model dimension
@@ -218,10 +220,10 @@ def generate(t_params: TransformerParams, input_bld: Tensor, sz: Size):
 
 
 if __name__ == "__main__":
-  text = load_shakespeare()[:100000]
+  text = load_shakespeare()[:10000]
   tokenizer = Tokenizer(text=text, iters=500)
   tokens = tokenizer.encode(text)
-  sz = Size(128, 128, 256, 8, 256 // 8, len(tokenizer.vocab))
+  sz = Size(64, 64, 128, 4, 128 // 4, len(tokenizer.vocab))
   xs, ys = prep_input(tokens, sz)
 
   l_params = LayerParams(
@@ -243,7 +245,7 @@ if __name__ == "__main__":
 
   optimizer = AdamW(params(t_params), lr=1e-3)
   with Tensor.train():
-    for step in tqdm(range(1000), desc="training gpt2", unit="step"):
+    for step in tqdm(range(5000), desc="training gpt2", unit="step"):
       xs_batch, ys_batch = sample_batch(xs, ys, sz)  # (B, L) (B, L, V)
       optimizer.zero_grad()
       out_bld = transformer(xs_batch, t_params, sz)
@@ -257,7 +259,7 @@ if __name__ == "__main__":
   pad_right = lambda xs: xs + [0] * (sz.L - len(xs))
   input = tokenizer.encode("With the")
   print(tokenizer.decode(input), end="")
-  for i in range(100):
+  for i in range(1500):
     input = pad_right(input)
     tok = generate(t_params, Tensor(pad_right(input)), sz).item()
     print(tokenizer.decode([tok]), end="")
