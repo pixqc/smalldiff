@@ -221,9 +221,8 @@ if __name__ == "__main__":
   text = load_shakespeare()[:100000]
   tokenizer = Tokenizer(text=text, iters=500)
   tokens = tokenizer.encode(text)
-  sz = Size(64, 16, 32, 4, 32 // 4, len(tokenizer.vocab))
+  sz = Size(128, 128, 256, 8, 256 // 8, len(tokenizer.vocab))
   xs, ys = prep_input(tokens, sz)
-  xs, ys = sample_batch(xs, ys, sz)  # (B, L) (B, L, V)
 
   l_params = LayerParams(
     Tensor.uniform(sz.D, sz.H, sz.K),
@@ -245,9 +244,10 @@ if __name__ == "__main__":
   optimizer = AdamW(params(t_params), lr=1e-3)
   with Tensor.train():
     for step in tqdm(range(1000), desc="training gpt2", unit="step"):
+      xs_batch, ys_batch = sample_batch(xs, ys, sz)  # (B, L) (B, L, V)
       optimizer.zero_grad()
-      out_bld = transformer(xs, t_params, sz)
-      loss_val = loss(out_bld, ys)
+      out_bld = transformer(xs_batch, t_params, sz)
+      loss_val = loss(out_bld, ys_batch)
       loss_val.backward()
       optimizer.step()
 
