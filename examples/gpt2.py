@@ -176,9 +176,8 @@ def attention(input_bld: Tensor, params: LayerParams, sz: Size):
 
 
 def ffw(input_bld: Tensor, params: LayerParams):
-  return (
-    input_bld @ params.w_ff1_dh + params.b_ff1_h
-  ).gelu() @ params.w_ff2_hd + params.b_ff2_d
+  out = (input_bld @ params.w_ff1_dh + params.b_ff1_h).gelu()
+  return out @ params.w_ff2_hd + params.b_ff2_d
 
 
 def transformer(xs: Tensor, params: TransformerParams, sz: Size):
@@ -191,7 +190,7 @@ def transformer(xs: Tensor, params: TransformerParams, sz: Size):
 
 
 def loss(y_pred, ys):
-  return -y_pred.log_softmax(axis=2).mul(ys).sum(axis=2).mean()
+  return -y_pred.log_softmax(axis=-1).mul(ys).sum(axis=-1).mean()
 
 
 def params(params: TransformerParams):
@@ -211,6 +210,11 @@ def params(params: TransformerParams):
     + [getattr(params, attr) for attr in transformer_attrs]
     + [params.emb_vd.weight]
   )
+
+
+def generate(t_params: TransformerParams, input_bld: Tensor, sz: Size):
+  out_bld = transformer(input_bld, t_params, sz)
+  return (out_bld[0][-1].softmax() / 1.0).multinomial()
 
 
 if __name__ == "__main__":
@@ -240,7 +244,7 @@ if __name__ == "__main__":
 
   optimizer = AdamW(params(t_params), lr=1e-3)
   with Tensor.train():
-    for step in tqdm(range(5000), desc="training gpt2", unit="step"):
+    for step in tqdm(range(1000), desc="training gpt2", unit="step"):
       optimizer.zero_grad()
       out_bld = transformer(xs, t_params, sz)
       loss_val = loss(out_bld, ys)
@@ -249,3 +253,14 @@ if __name__ == "__main__":
 
       if step % 100 == 0:
         print(f"step {step}: loss={loss_val.numpy():.2f}")
+
+  pad_right = lambda xs: xs + [0] * (sz.L - len(xs))
+  input = tokenizer.encode("With the")
+  print(tokenizer.decode(input), end="")
+  for i in range(100):
+    input = pad_right(input)
+    tok = generate(t_params, Tensor(pad_right(input)), sz).item()
+    print(tokenizer.decode([tok]), end="")
+    input = input[: min(len(input), sz.L)]
+    input.append(tok)
+    input = input[-sz.L :]
